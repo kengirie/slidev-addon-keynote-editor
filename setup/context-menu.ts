@@ -7,12 +7,13 @@ import {
   duplicateBlock,
   editText,
   freePosition,
+  hideBox,
   isPositioned,
   moveBlockBy,
+  reapplyBox,
   returnToFlow,
 } from '../client/actions'
 import { studioContext } from '../client/context'
-import { resetBox, setBoxHidden } from '../client/md/boxes'
 import { selection, studioOpen } from '../client/state'
 
 /**
@@ -72,14 +73,14 @@ export default (items: ComputedRef<ContextMenuItem[]>): ComputedRef<ContextMenuI
         {
           icon: 'i-carbon:reset',
           label: '選択内容にレイアウトを再適用',
-          action: () => studio.editFrontmatterRaw(raw => resetBox(raw, box), 'Reapply layout'),
+          action: () => reapplyBox(studio, box),
         },
         {
           icon: 'i-carbon:trash-can',
           label: '削除（非表示）',
           action: () => {
             selection.value = null
-            return studio.editFrontmatterRaw(raw => setBoxHidden(raw, box, true), 'Delete placeholder')
+            return hideBox(studio, box)
           },
         },
         'separator',

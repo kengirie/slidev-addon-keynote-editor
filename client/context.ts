@@ -29,7 +29,7 @@ export interface StudioContext {
   /** Starts editing a placeholder's text, the caret at the end. */
   editBox: (box: HTMLElement) => void
   /** Writes a placeholder's `dragPos.<name>` in place, without rebuilding the slide. */
-  setDragPos: (name: string, value: string | null, label: string) => Promise<void>
+  setDragPos: (name: string, value: string | null, label: string, on?: number) => Promise<void>
   setNote: (note: string) => Promise<void>
   /** Range of the current selection, or `null` when nothing is selected. */
   range: () => SourceRange | null

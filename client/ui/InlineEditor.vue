@@ -8,6 +8,7 @@ import { replaceInnerHtml, stripStudioAttrs } from '../md/html'
 import { getBlock, replaceBlock } from '../md/lines'
 import { editIntent, editing, editingBox, reportError, selection } from '../state'
 import { fillBox } from '../md/boxes'
+import { describeBox } from '../composables/useSelection'
 import { useStudio } from '../context'
 import { onDomEvent } from '../composables/useDomEvent'
 import StudioIcon from './parts/StudioIcon.vue'
@@ -66,6 +67,14 @@ let heldKind: 'block' | 'container' | 'prop' | 'html' | 'prompt' = 'block'
 let promptBox = ''
 let promptText = ''
 
+/**
+ * The frontmatter key being edited, fixed when the edit starts. A press
+ * elsewhere selects what was pressed before the edit is applied, so reading the
+ * key from the selection at that point wrote the text to the wrong key, or to
+ * none.
+ */
+let heldProp = ''
+
 /** For an edit inside raw HTML: the element's tag, and the words it held. */
 let htmlTag = ''
 let htmlWas = ''
@@ -121,6 +130,7 @@ watch(editing, async (open) => {
   const propEl = selection.value?.el
   if (propKey && propEl) {
     heldKind = 'prop'
+    heldProp = propKey
     held = null
     shape.value = null
     source = String(studio.frontmatter()[propKey] ?? '')
@@ -435,7 +445,7 @@ async function apply() {
   }
 
   if (heldKind === 'prop') {
-    const key = selection.value?.prop
+    const key = heldProp
     const written = (editable?.textContent ?? '').replace(/\s+/g, ' ').trim()
     release()
     editing.value = false
@@ -502,7 +512,7 @@ async function finish(then: 'none' | 'box') {
   if (then === 'none' || !box)
     selection.value = null
   else
-    selection.value = { el: box.el, no: studio.no(), range: null, kind: 'box', box: box.name, positioned: true, nested: false, label: box.name }
+    selection.value = describeBox(box.el, studio.no())
   await pending
 }
 

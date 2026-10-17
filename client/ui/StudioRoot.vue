@@ -3,8 +3,8 @@ import type { StudioContext } from '../context'
 import { useNav } from '@slidev/client'
 import { useWindowSize } from '@vueuse/core'
 import { computed, onScopeDispose, provide, watch, watchEffect } from 'vue'
-import { duplicateBlock, nudgeBlock } from '../actions'
-import { formatBoxPos, setBoxHidden } from '../md/boxes'
+import { duplicateBlock, hideBox, nudgeBlock } from '../actions'
+import { formatBoxPos } from '../md/boxes'
 import { onDomEvent } from '../composables/useDomEvent'
 import { useSelection } from '../composables/useSelection'
 import { useSlideCanvas } from '../composables/useSlideCanvas'
@@ -70,12 +70,12 @@ const gizmo = useTransformGizmo({
       selectionApi.selectThrough(x, y)
   },
   // Written in place, as Slidev's v-drag does, so the slide is not rebuilt.
-  writeBox: (name, geometry) => source.setDragPos(name, formatBoxPos(geometry), 'Move placeholder'),
+  writeBox: (name, geometry, on) => source.setDragPos(name, formatBoxPos(geometry), 'Move placeholder', on),
 })
 
 // Keynote: the press that selects a placeholder can already be a drag.
 selectionApi.hooks.pressBox = event => gizmo.startMove(event, true)
-selectionApi.hooks.hideBox = name => source.editFrontmatterRaw(raw => setBoxHidden(raw, name, true), 'Delete placeholder')
+selectionApi.hooks.hideBox = name => hideBox(source, name)
 
 const context: StudioContext = {
   no: () => no.value,
@@ -87,7 +87,7 @@ const context: StudioContext = {
   commit,
   setFrontmatter: (values, label) => source.setFrontmatter(values, label),
   editFrontmatterRaw: (change, label) => source.editFrontmatterRaw(change, label),
-  setDragPos: (name, value, label) => source.setDragPos(name, value, label),
+  setDragPos: (name, value, label, on) => source.setDragPos(name, value, label, on),
   editBox: box => selectionApi.startBoxEdit(box, { mode: 'end' }),
   setNote: note => source.setNote(note),
   range: () => selection.value?.range ?? null,

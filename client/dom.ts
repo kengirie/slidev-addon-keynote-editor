@@ -47,3 +47,20 @@ export function belongsToSlide(node: Element, no: number): boolean {
   const root = slideElement(no)
   return !!root && root.contains(node)
 }
+
+/**
+ * Puts a placeholder where it now is, and tells it.
+ *
+ * A move is written without rebuilding the slide, so the box's own idea of its
+ * position stays old until the next rebuild. The box listens for this event
+ * and draws from it, or any re-render of it (text shrinking to fit, say) put
+ * it back where it was.
+ */
+export function placeBox(el: HTMLElement, g: { x: number, y: number, w: number, h: number, rotate: number }, origin: { x: number, y: number }) {
+  el.style.left = `${g.x - origin.x}px`
+  el.style.top = `${g.y - origin.y}px`
+  el.style.width = `${g.w}px`
+  el.style.height = `${g.h}px`
+  el.style.transform = g.rotate ? `rotate(${g.rotate}deg)` : ''
+  el.dispatchEvent(new CustomEvent('kbox-place', { detail: { ...g } }))
+}

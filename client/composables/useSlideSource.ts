@@ -42,11 +42,24 @@ async function send(no: number, data: SlidePatch) {
   }
 }
 
-/** The frontmatter block as the deck has it right now, not as it was cached. */
-async function currentFrontmatterRaw(no: number): Promise<string | null> {
+/**
+ * The frontmatter as the deck has it right now, not as it was cached.
+ *
+ * Positions written in place (HMR skipped, as Slidev's v-drag does) reach the
+ * server's frontmatter before the text it reports, so the text is caught up
+ * with the server's `dragPos` here. Every writer of the raw block goes through
+ * this; editing the stale text would quietly drop every box moved since the
+ * last rebuild.
+ */
+async function currentFrontmatter(no: number): Promise<{ raw: string, frontmatter: Record<string, any> } | null> {
   try {
     const info = await fetch(`/__slidev/slides/${no}.json`).then(r => r.json())
-    return typeof info?.frontmatterRaw === 'string' ? info.frontmatterRaw : null
+    if (typeof info?.frontmatterRaw !== 'string')
+      return null
+    const frontmatter = info.frontmatter ?? {}
+    const dragPos = frontmatter.dragPos
+    const raw = dragPos && typeof dragPos === 'object' ? setDragPosMap(info.frontmatterRaw, dragPos) : info.frontmatterRaw
+    return { raw, frontmatter }
   }
   catch {
     return null
@@ -99,13 +112,16 @@ export function useSlideSource(no: MaybeRefOrGetter<number>) {
     // the last response left behind, and Slidev does not always answer a write
     // with the new raw text, so patching the cache meant every control wrote
     // over the key the one before it had set.
-    const currentRaw = await currentFrontmatterRaw(slideNo.value) ?? info.value?.frontmatterRaw ?? ''
+    // The slide is fixed before anything is awaited: navigating while the
+    // request is in flight must not send this slide's frontmatter to another.
+    const at = slideNo.value
+    const currentRaw = (await currentFrontmatter(at))?.raw ?? info.value?.frontmatterRaw ?? ''
     const { raw, unhandled } = patchFrontmatterRaw(currentRaw, values)
 
     const handled = Object.fromEntries(Object.entries(values).filter(([key]) => !unhandled.includes(key)))
     if (Object.keys(handled).length) {
-      push({ kind: 'frontmatterRaw', label, no: slideNo.value, before: currentRaw, after: raw })
-      await send(slideNo.value, { frontmatterRaw: raw })
+      push({ kind: 'frontmatterRaw', label, no: at, before: currentRaw, after: raw })
+      await send(at, { frontmatterRaw: raw })
     }
 
     if (unhandled.length) {
@@ -113,8 +129,8 @@ export function useSlideSource(no: MaybeRefOrGetter<number>) {
       const before: Record<string, any> = {}
       for (const key of unhandled)
         before[key] = frontmatter.value[key] ?? null
-      push({ kind: 'frontmatter', label, no: slideNo.value, before, after: rest })
-      await send(slideNo.value, { frontmatter: rest })
+      push({ kind: 'frontmatter', label, no: at, before, after: rest })
+      await send(at, { frontmatter: rest })
     }
   }
 
@@ -126,19 +142,13 @@ export function useSlideSource(no: MaybeRefOrGetter<number>) {
    * reason as above, and the result is recorded for undo.
    */
   async function editFrontmatterRaw(change: (raw: string) => string, label: string) {
-    const fresh = await fetch(`/__slidev/slides/${slideNo.value}.json`).then(r => r.json()).catch(() => null)
-    let currentRaw: string = typeof fresh?.frontmatterRaw === 'string' ? fresh.frontmatterRaw : (info.value?.frontmatterRaw ?? '')
-    // Positions written in place are in the server's frontmatter before they
-    // are in the text it reports, so the text is caught up first. Editing the
-    // stale text would quietly drop every box moved since the last rebuild.
-    const dragPos = fresh?.frontmatter?.dragPos
-    if (dragPos && typeof dragPos === 'object')
-      currentRaw = setDragPosMap(currentRaw, dragPos)
+    const at = slideNo.value
+    const currentRaw = (await currentFrontmatter(at))?.raw ?? info.value?.frontmatterRaw ?? ''
     const raw = change(currentRaw)
     if (raw === currentRaw)
       return
-    push({ kind: 'frontmatterRaw', label, no: slideNo.value, before: currentRaw, after: raw })
-    await send(slideNo.value, { frontmatterRaw: raw })
+    push({ kind: 'frontmatterRaw', label, no: at, before: currentRaw, after: raw })
+    await send(at, { frontmatterRaw: raw })
   }
 
   /**
@@ -152,10 +162,17 @@ export function useSlideSource(no: MaybeRefOrGetter<number>) {
    * Undo and redo are recorded as raw frontmatter, which does rebuild: going
    * back is the one time the slide has to be drawn from the file again.
    */
-  async function setDragPos(name: string, value: string | null, label: string) {
-    const fresh = await fetch(`/__slidev/slides/${slideNo.value}.json`).then(r => r.json()).catch(() => null)
-    const reportedRaw: string = typeof fresh?.frontmatterRaw === 'string' ? fresh.frontmatterRaw : (info.value?.frontmatterRaw ?? '')
-    const before: Record<string, string> = { ...(fresh?.frontmatter?.dragPos ?? info.value?.frontmatter?.dragPos ?? {}) }
+  async function setDragPos(name: string, value: string | null, label: string, on?: number) {
+    // `on` is the slide the gesture belonged to: an arrow-key nudge is written
+    // a moment after the last key, by which time the deck may have moved on.
+    const at = on ?? slideNo.value
+    const fresh = await currentFrontmatter(at)
+    // The cached info belongs to whichever slide is current now, which need not
+    // be `at`: it is only a fallback when the server could not be asked, and
+    // only for the slide it describes.
+    const cached = at === slideNo.value ? info.value : null
+    const reportedRaw = fresh ? fresh.raw : (cached?.frontmatterRaw ?? '')
+    const before: Record<string, string> = { ...(fresh ? (fresh.frontmatter.dragPos ?? {}) : (cached?.frontmatter?.dragPos ?? {})) }
     if (before[name] === value)
       return
     const current = { ...before }
@@ -166,11 +183,11 @@ export function useSlideSource(no: MaybeRefOrGetter<number>) {
     push({
       kind: 'frontmatterRaw',
       label,
-      no: slideNo.value,
+      no: at,
       before: setDragPosMap(reportedRaw, before),
       after: setDragPosMap(reportedRaw, current),
     })
-    await send(slideNo.value, {
+    await send(at, {
       frontmatter: { dragPos: Object.keys(current).length ? current : null },
       skipHmr: true,
     } as SlidePatch)

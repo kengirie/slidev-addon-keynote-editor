@@ -3,7 +3,7 @@ import type { BoxGeometry } from '../md/boxes'
 import type { Box, Guide } from './useSnapping'
 import type { useSlideCanvas } from './useSlideCanvas'
 import { ref, shallowRef } from 'vue'
-import { mappedElements } from '../dom'
+import { mappedElements, placeBox } from '../dom'
 import { onDomEvent } from './useDomEvent'
 import { DRAG_WRAPPER_PADDING, readDrag, writeDrag } from '../md/drag'
 import { gridEnabled, gridSize, snapEnabled } from '../state'
@@ -56,7 +56,7 @@ export function useTransformGizmo(context: {
   /** Selects what lies under a point, for a press on the overlay that was a click. */
   selectThrough: (x: number, y: number) => void
   /** Writes a layout placeholder's new geometry (`dragPos.<name>`). */
-  writeBox: (name: string, geometry: BoxGeometry) => Promise<void>
+  writeBox: (name: string, geometry: BoxGeometry, on?: number) => Promise<void>
 }) {
   const { canvas } = context
 
@@ -314,8 +314,10 @@ export function useTransformGizmo(context: {
     // until the slide is rebuilt from the new value, so nothing jumps back.
     if (target.kind === 'box' && target.box) {
       const name = target.box
+      if (painted)
+        placeBox(painted, { ...box, rotate: startRotate }, canvas.originOf(painted))
       target = null
-      await context.writeBox(name, { x: box.x, y: box.y, w: box.w, h: box.h, rotate: startRotate })
+      await context.writeBox(name, { x: box.x, y: box.y, w: box.w, h: box.h, rotate: startRotate }, startNo)
       preview.value = null
       return
     }
@@ -451,7 +453,6 @@ export function useTransformGizmo(context: {
     painted.style.width = `${box.w}px`
     if (!autoHeight)
       painted.style.height = `${box.h}px`
-    painted.style.zIndex = '100'
 
     painted.style.transform = rotate ? `rotate(${rotate}deg)` : ''
     painted.style.transformOrigin = 'center center'
@@ -475,22 +476,20 @@ export function useTransformGizmo(context: {
    * the key has been let go of, since every write rebuilds the slide.
    */
   let nudgeTimer: ReturnType<typeof setTimeout> | undefined
-  let nudging: { name: string, el: HTMLElement, box: Box, rotate: number } | null = null
+  let nudging: { name: string, el: HTMLElement, box: Box, rotate: number, no: number } | null = null
   function nudgeBox(current: StudioTarget, dx: number, dy: number) {
     if (current.kind !== 'box' || !current.box)
       return
     if (!nudging || nudging.name !== current.box || !document.contains(nudging.el))
-      nudging = { name: current.box, el: current.el, box: canvas.boxOf(current.el), rotate: rotationOfStyle(current.el) }
+      nudging = { name: current.box, el: current.el, box: canvas.boxOf(current.el), rotate: rotationOfStyle(current.el), no: current.no }
     nudging.box = { ...nudging.box, x: nudging.box.x + dx, y: nudging.box.y + dy }
-    const origin = canvas.originOf(nudging.el)
-    nudging.el.style.left = `${nudging.box.x - origin.x}px`
-    nudging.el.style.top = `${nudging.box.y - origin.y}px`
+    placeBox(nudging.el, { ...nudging.box, rotate: nudging.rotate }, canvas.originOf(nudging.el))
     clearTimeout(nudgeTimer)
     nudgeTimer = setTimeout(() => {
       const done = nudging
       nudging = null
       if (done)
-        context.writeBox(done.name, { ...done.box, rotate: done.rotate })
+        context.writeBox(done.name, { ...done.box, rotate: done.rotate }, done.no)
     }, 350)
   }
 

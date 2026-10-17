@@ -7,10 +7,11 @@ import { readProp, writeProp } from '../../md/props'
 import { readDrag, writeDrag } from '../../md/drag'
 import { getBlock, replaceBlock } from '../../md/lines'
 import { canStyle, readClasses, writeClasses } from '../../md/classes'
-import { canReorder, deleteBlock, duplicateBlock, freePosition, moveBlockBy, returnToFlow } from '../../actions'
+import { canReorder, deleteBlock, duplicateBlock, freePosition, hideBox as hideBoxAction, moveBlockBy, reapplyBox, returnToFlow } from '../../actions'
 import { missed, selection } from '../../state'
-import { formatBoxPos, parseBoxPos, resetBox, setBoxHidden } from '../../md/boxes'
-import { layoutBoxes } from '../../dom'
+import { formatBoxPos, parseBoxPos, setBoxHidden } from '../../md/boxes'
+import { layoutBoxes, placeBox } from '../../dom'
+import { useMutationObserver } from '@vueuse/core'
 import PropField from '../parts/PropField.vue'
 import StudioField from '../parts/StudioField.vue'
 import StudioIcon from '../parts/StudioIcon.vue'
@@ -153,26 +154,25 @@ const boxGeometry = computed(() => {
   // From the box as drawn: a position written in place is on screen before the
   // frontmatter the panel holds catches up.
   const box = studio.canvas.boxOf(current.el)
-  const saved = parseBoxPos(studio.frontmatter().dragPos?.[current.box])
-  return { x: box.x, y: box.y, w: box.w, h: box.h, rotate: saved?.rotate ?? 0 }
+  // The rotation as drawn: from dragPos, boxes.<name>.rotate or the layout.
+  const turned = current.el.style.transform.match(/rotate\((-?[\d.]+)deg\)/)
+  return { x: box.x, y: box.y, w: box.w, h: box.h, rotate: turned ? Number(turned[1]) : 0 }
 })
 const boxMoved = computed(() => {
   const name = boxTarget.value?.box
   return !!name && (studio.frontmatter().dragPos?.[name] != null || studio.frontmatter().boxes?.[name] != null)
 })
 
-async function setBoxField(field: 'x' | 'y' | 'w' | 'h' | 'rotate', value: number) {
+async function setBoxField(field: 'x' | 'y' | 'w' | 'h' | 'rotate', input: string) {
   const name = boxTarget.value?.box
-  if (!name || !boxGeometry.value || !Number.isFinite(value))
+  const value = Number(input)
+  // An emptied field is no value, not zero, and a box has a size.
+  if (!name || !boxGeometry.value || input.trim() === '' || !Number.isFinite(value) || ((field === 'w' || field === 'h') && value <= 0))
     return
   const next = { ...boxGeometry.value, [field]: value }
   // Painted at once and written in place, like a drag, so the slide is not rebuilt.
   const el = boxTarget.value!.el
-  el.style.left = `${next.x - studio.canvas.originOf(el).x}px`
-  el.style.top = `${next.y - studio.canvas.originOf(el).y}px`
-  el.style.width = `${next.w}px`
-  el.style.height = `${next.h}px`
-  el.style.transform = next.rotate ? `rotate(${next.rotate}deg)` : ''
+  placeBox(el, next, studio.canvas.originOf(el))
   await studio.setDragPos(name, formatBoxPos(next), 'Set placeholder position')
 }
 
@@ -180,7 +180,7 @@ async function setBoxField(field: 'x' | 'y' | 'w' | 'h' | 'rotate', value: numbe
 async function reapplyLayout() {
   const name = boxTarget.value?.box
   if (name)
-    await studio.editFrontmatterRaw(raw => resetBox(raw, name), 'Reapply layout')
+    await reapplyBox(studio, name)
 }
 
 async function hideBox() {
@@ -188,11 +188,22 @@ async function hideBox() {
   if (!name)
     return
   selection.value = null
-  await studio.editFrontmatterRaw(raw => setBoxHidden(raw, name, true), 'Delete placeholder')
+  await hideBoxAction(studio, name)
 }
 
 /** The slide's placeholders, for the show/hide checkboxes Keynote has in the sidebar. */
+/*
+ * The layout writes its list of boxes onto the slide as an attribute, which is
+ * not reactive: it can appear after the panel first looked (the editor's open
+ * state reaches the layout a moment later), so a change to it is watched for.
+ */
+const layoutTick = ref(0)
+// The layout can also arrive as a new element that already carries it, which is
+// a change to the tree rather than to an attribute.
+useMutationObserver(document.body, () => layoutTick.value++, { subtree: true, childList: true, attributes: true, attributeFilter: ['data-studio-layout-boxes'] })
+
 const slideBoxes = computed(() => {
+  void layoutTick.value
   // Which boxes there are comes from the layout; whether each is shown comes
   // from the frontmatter itself, which is updated before the slide re-renders.
   const overrides = studio.frontmatter().boxes ?? {}
@@ -222,19 +233,19 @@ async function toggleBox(name: string, shown: boolean) {
       プレースホルダ「{{ boxTarget.box }}」
     </h3>
     <StudioField label="X">
-      <input type="number" :value="Math.round(boxGeometry.x)" @change="setBoxField('x', +($event.target as HTMLInputElement).value)">
+      <input type="number" :value="Math.round(boxGeometry.x)" @change="setBoxField('x', ($event.target as HTMLInputElement).value)">
     </StudioField>
     <StudioField label="Y">
-      <input type="number" :value="Math.round(boxGeometry.y)" @change="setBoxField('y', +($event.target as HTMLInputElement).value)">
+      <input type="number" :value="Math.round(boxGeometry.y)" @change="setBoxField('y', ($event.target as HTMLInputElement).value)">
     </StudioField>
     <StudioField label="幅">
-      <input type="number" :value="Math.round(boxGeometry.w)" @change="setBoxField('w', +($event.target as HTMLInputElement).value)">
+      <input type="number" :value="Math.round(boxGeometry.w)" @change="setBoxField('w', ($event.target as HTMLInputElement).value)">
     </StudioField>
     <StudioField label="高さ">
-      <input type="number" :value="Math.round(boxGeometry.h)" @change="setBoxField('h', +($event.target as HTMLInputElement).value)">
+      <input type="number" :value="Math.round(boxGeometry.h)" @change="setBoxField('h', ($event.target as HTMLInputElement).value)">
     </StudioField>
     <StudioField label="回転">
-      <input type="number" :value="Math.round(boxGeometry.rotate)" @change="setBoxField('rotate', +($event.target as HTMLInputElement).value)">
+      <input type="number" :value="Math.round(boxGeometry.rotate)" @change="setBoxField('rotate', ($event.target as HTMLInputElement).value)">
     </StudioField>
     <p class="studio-hint">
       X・Y は枠の左上、スライドの左上からの pt（Keynote の「配置」と同じ）

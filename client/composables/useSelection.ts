@@ -531,6 +531,12 @@ export function useSelection(
     }
     block ??= [...box.querySelectorAll<HTMLElement>('[data-studio-src]')].find(el => boxFrom(el) === box) ?? null
 
+    // Nothing in it can be typed into (a picture, or a slot holding only a
+    // component the editor cannot trace): the box stays selected, rather than
+    // entering an edit with nothing held that only Escape could leave.
+    if (!block && !box.querySelector('.kbox-prompt'))
+      return
+
     editingBox.value = { el: box, name }
     editIntent.value = intent
     selection.value = block ? describe(block, no(), content()) : describeBox(box, no())
@@ -540,7 +546,7 @@ export function useSelection(
   return { select, targetFrom, reselect, selectInserted, selectThrough, startBoxEdit, hooks }
 }
 
-function describeBox(el: HTMLElement, no: number): StudioTarget {
+export function describeBox(el: HTMLElement, no: number): StudioTarget {
   const name = el.dataset.studioBox!
   return {
     el,

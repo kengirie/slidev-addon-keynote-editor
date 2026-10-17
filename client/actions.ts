@@ -1,4 +1,5 @@
 import type { StudioContext } from './context'
+import { resetBox, setBoxHidden } from './md/boxes'
 import type { SourceRange, StudioTarget } from './types'
 import { readDrag, removeDrag, writeDrag } from './md/drag'
 import { duplicateListItem, getBlock, insertAfter, moveBlock, moveListItem, removeBlock } from './md/lines'
@@ -170,4 +171,14 @@ export async function moveBlockBy(studio: StudioContext, target: StudioTarget, d
   }
   const unit = positionedUnit(studio.content(), target.range)
   await studio.commit(moveBlock(studio.content(), unit, direction), 'Reorder block')
+}
+
+/** Keynote's Delete on a placeholder: it is hidden on this slide, its text kept. */
+export function hideBox(studio: Pick<StudioContext, 'editFrontmatterRaw'>, name: string) {
+  return studio.editFrontmatterRaw(raw => setBoxHidden(raw, name, true), 'Delete placeholder')
+}
+
+/** Keynote's Reapply Layout to Selection. */
+export function reapplyBox(studio: Pick<StudioContext, 'editFrontmatterRaw'>, name: string) {
+  return studio.editFrontmatterRaw(raw => resetBox(raw, name), 'Reapply layout')
 }
