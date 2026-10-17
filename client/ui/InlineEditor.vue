@@ -530,7 +530,12 @@ function toMarkdown() {
         ? serialiseContainer(editable as any, verbatim)
         : (shape.value ? serialiseBlock(editable, shape.value) : null))
     : null
+  // The lines being edited stay the ones this edit writes back to. Without them
+  // `apply` fell back to the selection, which a press elsewhere may already have
+  // moved to another block, and the draft was written over that block.
+  const keep = held
   release()
+  held = keep
   draft.value = written ?? source
   mode.value = 'markdown'
   nextTick(() => box.value?.focus())

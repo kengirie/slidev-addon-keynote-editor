@@ -10,8 +10,8 @@ import { canStyle, readClasses, writeClasses } from '../../md/classes'
 import { canReorder, deleteBlock, duplicateBlock, freePosition, hideBox as hideBoxAction, moveBlockBy, reapplyBox, returnToFlow } from '../../actions'
 import { missed, selection } from '../../state'
 import { formatBoxPos, parseBoxPos, setBoxHidden } from '../../md/boxes'
-import { layoutBoxes, placeBox } from '../../dom'
-import { useMutationObserver } from '@vueuse/core'
+import { layoutBoxes, placeBox, slideElement } from '../../dom'
+import { useIntervalFn } from '@vueuse/core'
 import PropField from '../parts/PropField.vue'
 import StudioField from '../parts/StudioField.vue'
 import StudioIcon from '../parts/StudioIcon.vue'
@@ -194,16 +194,21 @@ async function hideBox() {
 /** The slide's placeholders, for the show/hide checkboxes Keynote has in the sidebar. */
 /*
  * The layout writes its list of boxes onto the slide as an attribute, which is
- * not reactive: it can appear after the panel first looked (the editor's open
- * state reaches the layout a moment later), so a change to it is watched for.
+ * not reactive and can appear after the panel first looked. It is read again a
+ * few times a second, only while the list is on screen (nothing selected), and
+ * only a changed value re-renders. Watching the document for it fired on every
+ * DOM change in the app, typing included.
  */
-const layoutTick = ref(0)
-// The layout can also arrive as a new element that already carries it, which is
-// a change to the tree rather than to an attribute.
-useMutationObserver(document.body, () => layoutTick.value++, { subtree: true, childList: true, attributes: true, attributeFilter: ['data-studio-layout-boxes'] })
+const layoutJson = ref('')
+const { pause, resume } = useIntervalFn(() => {
+  const now = slideElement(studio.no())?.querySelector<HTMLElement>('[data-studio-layout-boxes]')?.dataset.studioLayoutBoxes ?? ''
+  if (now !== layoutJson.value)
+    layoutJson.value = now
+}, 300, { immediate: false, immediateCallback: true })
+watch(() => !selection.value, show => (show ? resume() : pause()), { immediate: true })
 
 const slideBoxes = computed(() => {
-  void layoutTick.value
+  void layoutJson.value
   // Which boxes there are comes from the layout; whether each is shown comes
   // from the frontmatter itself, which is updated before the slide re-renders.
   const overrides = studio.frontmatter().boxes ?? {}

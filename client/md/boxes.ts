@@ -148,7 +148,11 @@ const RE_CLICK_CLOSE = /^<\/v-clicks?>$/
  */
 export function slotRange(content: string, name: string, isMain: boolean): [number, number] | null {
   const lines = content.split(/\r?\n/)
-  let start = lines.findIndex(line => line.trim() === `::${name}::`)
+  const marker = (label: string) => lines.findIndex(line => line.trim() === `::${label}::`)
+  let start = marker(name)
+  // Slidev's own name for the default slot, which the main box shows too.
+  if (start < 0 && isMain)
+    start = marker('default')
   let end: number
   if (start >= 0) {
     start += 1
@@ -174,7 +178,9 @@ export function slotRange(content: string, name: string, isMain: boolean): [numb
   if (start >= end)
     return null
 
-  if (RE_CLICK_OPEN.test(lines[start].trim()) && RE_CLICK_CLOSE.test(lines[end - 1].trim())) {
+  // One wrapper around all of it: the closing tag that ends the first opening
+  // one has to be the last line. Two wrappers side by side are not one.
+  if (RE_CLICK_OPEN.test(lines[start].trim()) && closingOf(lines, start) === end - 1) {
     start += 1
     end -= 1
     trim()
@@ -182,6 +188,21 @@ export function slotRange(content: string, name: string, isMain: boolean): [numb
       return null
   }
   return [start, end]
+}
+
+/** The line closing the `<v-click(s)>` opened on `open`, counting nested ones. */
+function closingOf(lines: string[], open: number): number {
+  let depth = 0
+  for (let i = open; i < lines.length; i++) {
+    const line = lines[i].trim()
+    if (RE_CLICK_OPEN.test(line))
+      depth += 1
+    else if (RE_CLICK_CLOSE.test(line))
+      depth -= 1
+    if (depth === 0)
+      return i
+  }
+  return -1
 }
 
 /** Whether a box's text is one list and nothing else, which can appear item by item. */
@@ -199,12 +220,18 @@ export function isSingleList(content: string, range: [number, number]): boolean 
  * so inside that placeholder's box.
  */
 export function appendToFree(content: string, block: string): string {
+  const eol = content.includes('\r\n') ? '\r\n' : '\n'
   const lines = content.split(/\r?\n/)
   const at = lines.findIndex(line => line.trim() === '::free::')
   const text = block.trim()
   if (at < 0) {
-    const body = content.replace(/\s+$/, '')
-    return `${body ? `${body}\n\n` : ''}::free::\n\n${text}\n`
+    // Only the end of the slide is touched: trailing blank lines go, one blank
+    // line separates the new section. Nothing else in the slide is reformatted.
+    let last = lines.length
+    while (last > 0 && !lines[last - 1].trim())
+      last -= 1
+    const head = lines.slice(0, last)
+    return [...head, ...(head.length ? [''] : []), '::free::', '', text, ''].join(eol)
   }
   let end = lines.findIndex((line, i) => i > at && RE_SLOT_MARKER.test(line.trim()))
   if (end < 0)
@@ -212,6 +239,6 @@ export function appendToFree(content: string, block: string): string {
   let last = end
   while (last > at + 1 && !lines[last - 1].trim())
     last -= 1
-  const next = [...lines.slice(0, last), '', text, '', ...lines.slice(end)]
-  return next.join('\n').replace(/\n{3,}/g, '\n\n')
+  const after = lines.slice(end)
+  return [...lines.slice(0, last), '', text, ...(after.length ? ['', ...after] : [''])].join(eol)
 }

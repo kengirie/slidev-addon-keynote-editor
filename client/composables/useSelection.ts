@@ -199,6 +199,10 @@ export function useSelection(
     // applies it) and, as in Keynote, selects what was pressed.
     if (editing.value && (!(event.target instanceof Element) || event.target.closest('.studio-editing, .studio-inline')))
       return
+    // This press ends an edit, and the edit is about to be written, which
+    // rebuilds the slide: it selects, but does not also start a drag that the
+    // rebuild would cut off halfway.
+    const endsEdit = editing.value
     // The overlay and the handles handle themselves.
     if (isStudioChrome(event.target))
       return
@@ -227,7 +231,7 @@ export function useSelection(
     missed.value = false
     selection.value = target
     // Keynote moves a placeholder with the same press that selects it.
-    if (target.kind === 'box')
+    if (target.kind === 'box' && !endsEdit)
       hooks.pressBox?.(event)
   }, { capture: true })
 
@@ -357,7 +361,9 @@ export function useSelection(
    * list item in a <v-drag> and took it out of its box.
    */
   watch([selection, editing], ([current, isEditing]) => {
-    if (isEditing || !current || current.kind === 'box')
+    // Words a layout renders from the frontmatter (data-studio-prop) are their
+    // own thing to edit, even inside a box.
+    if (isEditing || !current || current.kind === 'box' || current.kind === 'frontmatter')
       return
     const box = boxFrom(current.el)
     if (box)

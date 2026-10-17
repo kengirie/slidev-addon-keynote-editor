@@ -65,3 +65,10 @@ declare module '@slidev/client/logic/contextMenu.ts' {
   export function openContextMenu(x: number, y: number): void
   export function closeContextMenu(): void
 }
+
+declare module '@slidev/client/logic/slides.ts' {
+  import type { SlideRoute } from '@slidev/types'
+
+  /** The route of a slide by number; its `meta.slide.frontmatter` is the reactive frontmatter the slide renders from. */
+  export function getSlide(no: number | string): SlideRoute | undefined
+}

@@ -70,3 +70,18 @@ describe('the free layer', () => {
     expect(appendToFree('::free::\n\n<A/>\n\n::body::\nB\n', '<C/>')).toBe('::free::\n\n<A/>\n\n<C/>\n\n::body::\nB\n')
   })
 })
+
+describe('second review', () => {
+  it('finds the main box text under ::default::', () => {
+    expect(slotRange('::title::\nT\n\n::default::\n- a\n- b\n', 'body', true)).toEqual([4, 6])
+  })
+  it('does not take two wrappers side by side for one', () => {
+    const content = '::body::\n<v-click>\n\nA\n\n</v-click>\n\nB\n\n<v-click>\n\nC\n\n</v-click>\n'
+    expect(slotRange(content, 'body', false)).toEqual([1, 14])
+  })
+  it('leaves the rest of the slide as it was when inserting', () => {
+    const content = '::body::\n```\na\n\n\n\nb\n```\n'
+    expect(appendToFree(content, '<A/>')).toBe('::body::\n```\na\n\n\n\nb\n```\n\n::free::\n\n<A/>\n')
+    expect(appendToFree('::title::\r\nT\r\n', '<A/>')).toBe('::title::\r\nT\r\n\r\n::free::\r\n\r\n<A/>\r\n')
+  })
+})

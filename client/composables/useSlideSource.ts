@@ -1,6 +1,7 @@
 import type { SlidePatch } from '@slidev/types'
 import type { MaybeRefOrGetter } from 'vue'
 import { useDynamicSlideInfo } from '@slidev/client/composables/useSlideInfo.ts'
+import { getSlide } from '@slidev/client/logic/slides.ts'
 import { computed, ref, toValue } from 'vue'
 import { patchFrontmatterRaw } from '../md/frontmatter'
 import { setDragPosMap } from '../md/boxes'
@@ -115,7 +116,10 @@ export function useSlideSource(no: MaybeRefOrGetter<number>) {
     // The slide is fixed before anything is awaited: navigating while the
     // request is in flight must not send this slide's frontmatter to another.
     const at = slideNo.value
-    const currentRaw = (await currentFrontmatter(at))?.raw ?? info.value?.frontmatterRaw ?? ''
+    const fresh = await currentFrontmatter(at)
+    if (!fresh && at !== slideNo.value)
+      return reportError(new Error('The slide changed before its frontmatter could be read, so nothing was written.'))
+    const currentRaw = fresh?.raw ?? info.value?.frontmatterRaw ?? ''
     const { raw, unhandled } = patchFrontmatterRaw(currentRaw, values)
 
     const handled = Object.fromEntries(Object.entries(values).filter(([key]) => !unhandled.includes(key)))
@@ -128,7 +132,7 @@ export function useSlideSource(no: MaybeRefOrGetter<number>) {
       const rest = Object.fromEntries(unhandled.map(key => [key, values[key]]))
       const before: Record<string, any> = {}
       for (const key of unhandled)
-        before[key] = frontmatter.value[key] ?? null
+        before[key] = (fresh?.frontmatter ?? frontmatter.value)[key] ?? null
       push({ kind: 'frontmatter', label, no: at, before, after: rest })
       await send(at, { frontmatter: rest })
     }
@@ -143,7 +147,12 @@ export function useSlideSource(no: MaybeRefOrGetter<number>) {
    */
   async function editFrontmatterRaw(change: (raw: string) => string, label: string) {
     const at = slideNo.value
-    const currentRaw = (await currentFrontmatter(at))?.raw ?? info.value?.frontmatterRaw ?? ''
+    const fresh = await currentFrontmatter(at)
+    // The cached info describes whichever slide is current, so it can stand in
+    // only while that is still the slide this edit is for.
+    if (!fresh && at !== slideNo.value)
+      return reportError(new Error('The slide changed before its frontmatter could be read, so nothing was written.'))
+    const currentRaw = fresh?.raw ?? info.value?.frontmatterRaw ?? ''
     const raw = change(currentRaw)
     if (raw === currentRaw)
       return
@@ -191,6 +200,18 @@ export function useSlideSource(no: MaybeRefOrGetter<number>) {
       frontmatter: { dragPos: Object.keys(current).length ? current : null },
       skipHmr: true,
     } as SlidePatch)
+
+    // The slide is not rebuilt, so its own frontmatter, which the layout draws
+    // from, is brought up to date here. Left stale, any re-render of a box put
+    // it back where it was, and a later undo or reapply that landed on the same
+    // stale value changed nothing on screen. A rebuild replaces this the usual way.
+    const live = (getSlide(at)?.meta as any)?.slide?.frontmatter as Record<string, any> | undefined
+    if (live) {
+      if (Object.keys(current).length)
+        live.dragPos = { ...current }
+      else
+        delete live.dragPos
+    }
   }
 
   async function setNote(next: string) {
