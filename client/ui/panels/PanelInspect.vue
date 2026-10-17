@@ -127,10 +127,26 @@ async function remove() {
 
 /* ---- Layout placeholders (Keynote) ---- */
 
+/**
+ * The placeholder the panel is about: the selected one, or the one whose text
+ * is being edited. Text inside a placeholder is not an object of its own, so
+ * Studio's block tools (free position, reorder, duplicate) are never offered
+ * for it, only the box's own.
+ */
+const boxTarget = computed(() => {
+  const current = selection.value
+  if (!current)
+    return null
+  if (current.kind === 'box' && current.box)
+    return { el: current.el, box: current.box }
+  const el = current.el.closest<HTMLElement>('[data-studio-box]')
+  return el?.dataset.studioBox ? { el, box: el.dataset.studioBox } : null
+})
+
 /** The selected placeholder's geometry: where it was moved to, or the layout's default. */
 const boxGeometry = computed(() => {
-  const current = selection.value
-  if (current?.kind !== 'box' || !current.box)
+  const current = boxTarget.value
+  if (!current)
     return null
   void studio.frontmatter()
   void revision.value
@@ -141,17 +157,17 @@ const boxGeometry = computed(() => {
   return { x: box.x, y: box.y, w: box.w, h: box.h, rotate: saved?.rotate ?? 0 }
 })
 const boxMoved = computed(() => {
-  const name = selection.value?.box
+  const name = boxTarget.value?.box
   return !!name && (studio.frontmatter().dragPos?.[name] != null || studio.frontmatter().boxes?.[name] != null)
 })
 
 async function setBoxField(field: 'x' | 'y' | 'w' | 'h' | 'rotate', value: number) {
-  const name = selection.value?.box
+  const name = boxTarget.value?.box
   if (!name || !boxGeometry.value || !Number.isFinite(value))
     return
   const next = { ...boxGeometry.value, [field]: value }
   // Painted at once and written in place, like a drag, so the slide is not rebuilt.
-  const el = selection.value!.el
+  const el = boxTarget.value!.el
   el.style.left = `${next.x - studio.canvas.originOf(el).x}px`
   el.style.top = `${next.y - studio.canvas.originOf(el).y}px`
   el.style.width = `${next.w}px`
@@ -162,13 +178,13 @@ async function setBoxField(field: 'x' | 'y' | 'w' | 'h' | 'rotate', value: numbe
 
 /** Keynote's フォーマット ＞ 選択内容にレイアウトを再適用. */
 async function reapplyLayout() {
-  const name = selection.value?.box
+  const name = boxTarget.value?.box
   if (name)
     await studio.editFrontmatterRaw(raw => resetBox(raw, name), 'Reapply layout')
 }
 
 async function hideBox() {
-  const name = selection.value?.box
+  const name = boxTarget.value?.box
   if (!name)
     return
   selection.value = null
@@ -201,9 +217,9 @@ async function toggleBox(name: string, shown: boolean) {
     </section>
   </template>
 
-  <section v-if="selection?.kind === 'box' && boxGeometry" class="studio-section">
+  <section v-if="boxTarget && boxGeometry" class="studio-section">
     <h3 class="studio-section__title">
-      プレースホルダ「{{ selection.box }}」
+      プレースホルダ「{{ boxTarget.box }}」
     </h3>
     <StudioField label="X">
       <input type="number" :value="Math.round(boxGeometry.x)" @change="setBoxField('x', +($event.target as HTMLInputElement).value)">
@@ -246,7 +262,7 @@ async function toggleBox(name: string, shown: boolean) {
     </template>
   </div>
 
-  <template v-else-if="selection?.kind === 'box'" />
+  <template v-else-if="boxTarget" />
 
   <div v-else-if="selection?.prop" class="studio-empty">
     <p>

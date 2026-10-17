@@ -7,6 +7,8 @@ import { BASIC_BLOCKS } from '../../blocks'
 import { useCatalog } from '../../composables/useCatalog'
 import { useStudio } from '../../context'
 import { insertSnippet, positioned } from '../../md/insert'
+import { appendToFree } from '../../md/boxes'
+import { slideElement } from '../../dom'
 import { activePanel, selection } from '../../state'
 import ComponentPreview from '../parts/ComponentPreview.vue'
 
@@ -37,12 +39,19 @@ const sourceFilters = [
   { id: 'builtin', label: 'Slidev' },
 ] as const
 
+/** A layout of placeholders: what is inserted goes on the slide, not into a box. */
+function boxLayout() {
+  return !!slideElement(studio.no())?.querySelector('[data-studio-layout-boxes]')
+}
+
 async function insert(item: { name: string, snippet: string, tag?: string }) {
   const range = selection.value?.range
-  await studio.commit(
-    insertSnippet(studio.content(), item.snippet, range ? { mode: 'after', range } : { mode: 'append' }),
-    `Insert ${item.name}`,
-  )
+  // As in Keynote, a new object lands in the middle of the slide, free of any
+  // placeholder.
+  const next = boxLayout()
+    ? appendToFree(studio.content(), positioned(item.snippet, { x: Math.round(studio.canvas.slideWidth.value / 2 - 130), y: Math.round(studio.canvas.slideHeight.value / 2 - 40), w: 260, h: null, rotate: 0 }))
+    : insertSnippet(studio.content(), item.snippet, range ? { mode: 'after', range } : { mode: 'append' })
+  await studio.commit(next, `Insert ${item.name}`)
   // Something just added is the thing you want to configure, so hand over to
   // the Element panel with it already selected. Matched on the tag it renders,
   // which for a Markdown block is nothing at all: a palette entry's name is a
@@ -66,7 +75,8 @@ onDomEvent<DragEvent>(window, 'drop', async (event) => {
   event.preventDefault()
   const point = studio.canvas.toCanvas(event.clientX, event.clientY)
   const snippet = positioned(component.snippet, { x: Math.round(point.x), y: Math.round(point.y), w: 260, h: null, rotate: 0 })
-  await studio.commit(insertSnippet(studio.content(), snippet, { mode: 'append' }), `Place ${component.name}`)
+  const next = boxLayout() ? appendToFree(studio.content(), snippet) : insertSnippet(studio.content(), snippet, { mode: 'append' })
+  await studio.commit(next, `Place ${component.name}`)
 })
 </script>
 

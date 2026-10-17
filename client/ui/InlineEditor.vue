@@ -253,6 +253,15 @@ function applyIntent(element: HTMLElement, isPrompt: boolean) {
   if (!intent)
     return
 
+  if (intent.mode === 'end') {
+    const end = document.createRange()
+    end.selectNodeContents(element)
+    end.collapse(false)
+    chosen.removeAllRanges()
+    chosen.addRange(end)
+    return
+  }
+
   const at = document.caretRangeFromPoint?.(intent.x, intent.y)
   if (!at || !element.contains(at.startContainer))
     return

@@ -6,6 +6,7 @@ import { useStudio } from '../../context'
 import { CLICK_ANIMATIONS, EMPTY_CLICKS, readClicks, writeClicks } from '../../md/clicks'
 import { MOTION_PRESETS, readMotion, writeMotion } from '../../md/motion'
 import { reportError, selection } from '../../state'
+import { isSingleList, slotRange } from '../../md/boxes'
 import StudioField from '../parts/StudioField.vue'
 
 /**
@@ -22,7 +23,24 @@ const clicks = computed(() => nav.clicksContext.value)
 const total = computed(() => clicks.value.total)
 const current = computed(() => clicks.value.current)
 
-const range = computed(() => selection.value?.range ?? null)
+/**
+ * A placeholder is animated as a whole, the way Keynote builds an object in:
+ * the range is its text (its slot). Text inside a placeholder is never
+ * animated on its own, since a wrapper there would split the box's Markdown.
+ */
+const boxEl = computed(() => {
+  const current = selection.value
+  if (!current)
+    return null
+  return current.kind === 'box' ? current.el : current.el.closest<HTMLElement>('[data-studio-box]')
+})
+const boxRange = computed(() => {
+  const el = boxEl.value
+  if (!el?.dataset.studioBox)
+    return null
+  return slotRange(studio.content(), el.dataset.studioBox, el.dataset.studioBoxMain === '1')
+})
+const range = computed(() => boxEl.value ? boxRange.value : (selection.value?.range ?? null))
 
 /** Every stop on this slide, the slide's own state included. */
 const steps = computed(() => {
@@ -47,7 +65,9 @@ watch([range, () => studio.content()], () => {
   motionDelay.value = current.delay
 }, { immediate: true })
 
-const canStagger = computed(() => selection.value?.kind === 'list')
+const canStagger = computed(() => boxEl.value
+  ? !!boxRange.value && isSingleList(studio.content(), boxRange.value)
+  : selection.value?.kind === 'list')
 const canMotion = computed(() => !!selection.value?.tag)
 
 async function apply(patch: Partial<ClickState>) {
@@ -68,7 +88,7 @@ async function apply(patch: Partial<ClickState>) {
    * items one at a time. That is what this does, and it says so.
    */
   let target = range.value
-  if (selection.value?.kind === 'list-item') {
+  if (!boxEl.value && selection.value?.kind === 'list-item') {
     const list = selection.value.el.closest<HTMLElement>('[data-studio-kind="list"]')
     const at = list?.dataset.studioSrc?.split(',').map(Number)
     if (!at || at.length !== 2 || !at.every(Number.isFinite)) {

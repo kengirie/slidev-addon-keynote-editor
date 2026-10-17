@@ -131,3 +131,87 @@ export function fillBox(content: string, name: string, text: string): string {
   const block = `::${name}::\n${text.trim()}\n`
   return body ? `${body}\n\n${block}` : block
 }
+
+const RE_SLOT_MARKER = /^::[\w-]+::\s*$/
+const RE_CLICK_OPEN = /^<v-clicks?\b[^>]*>$/
+const RE_CLICK_CLOSE = /^<\/v-clicks?>$/
+
+/**
+ * The lines a placeholder's text occupies, for edits that act on a whole box
+ * (a click animation, as Keynote builds an object in).
+ *
+ * A box's text is its named slot, `::name::` up to the next slot marker; the
+ * layout's main box also takes what comes before the first marker. Blank lines
+ * at either end are left out, and so is a `<v-click>`/`<v-clicks>` wrapper
+ * already around the text, so that the wrapper is what an animation edit finds
+ * and rewrites rather than wrapping a second time.
+ */
+export function slotRange(content: string, name: string, isMain: boolean): [number, number] | null {
+  const lines = content.split(/\r?\n/)
+  let start = lines.findIndex(line => line.trim() === `::${name}::`)
+  let end: number
+  if (start >= 0) {
+    start += 1
+    end = lines.findIndex((line, i) => i >= start && RE_SLOT_MARKER.test(line.trim()))
+  }
+  else if (isMain) {
+    start = 0
+    end = lines.findIndex(line => RE_SLOT_MARKER.test(line.trim()))
+  }
+  else {
+    return null
+  }
+  if (end < 0)
+    end = lines.length
+
+  const trim = () => {
+    while (start < end && !lines[start].trim())
+      start += 1
+    while (end > start && !lines[end - 1].trim())
+      end -= 1
+  }
+  trim()
+  if (start >= end)
+    return null
+
+  if (RE_CLICK_OPEN.test(lines[start].trim()) && RE_CLICK_CLOSE.test(lines[end - 1].trim())) {
+    start += 1
+    end -= 1
+    trim()
+    if (start >= end)
+      return null
+  }
+  return [start, end]
+}
+
+/** Whether a box's text is one list and nothing else, which can appear item by item. */
+export function isSingleList(content: string, range: [number, number]): boolean {
+  const lines = content.split(/\r?\n/).slice(range[0], range[1]).filter(line => line.trim())
+  return lines.length > 0 && /^([-*+]|\d+[.)])\s/.test(lines[0]) && lines.every(line => /^(\s*([-*+]|\d+[.)])\s|\s+\S)/.test(line))
+}
+
+/**
+ * Adds a block to the slide's free layer (`::free::`), where objects that are
+ * not in a placeholder live. Appended to that section when there is one, or a
+ * new section at the end of the slide.
+ *
+ * Without this an inserted component landed in whichever slot came last, and
+ * so inside that placeholder's box.
+ */
+export function appendToFree(content: string, block: string): string {
+  const lines = content.split(/\r?\n/)
+  const at = lines.findIndex(line => line.trim() === '::free::')
+  const text = block.trim()
+  if (at < 0) {
+    const body = content.replace(/\s+$/, '')
+    return `${body ? `${body}\n\n` : ''}::free::\n\n${text}\n`
+  }
+  let end = lines.findIndex((line, i) => i > at && RE_SLOT_MARKER.test(line.trim()))
+  if (end < 0)
+    end = lines.length
+  let last = end
+  while (last > at + 1 && !lines[last - 1].trim())
+    last -= 1
+  const next = [...lines.slice(0, last), '', text, '', ...lines.slice(end)]
+  return next.join('\n').replace(/\n{3,}/g, '\n\n')
+}

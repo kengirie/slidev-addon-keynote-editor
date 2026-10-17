@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { fillBox, formatBoxPos, parseBoxPos, resetBox, setBoxHidden, setBoxPos } from '../client/md/boxes'
+import { appendToFree, fillBox, formatBoxPos, isSingleList, parseBoxPos, resetBox, setBoxHidden, setBoxPos, slotRange } from '../client/md/boxes'
 
 describe('layout placeholders in the frontmatter', () => {
   it('writes dragPos for a moved box, keeping comments and other keys', () => {
@@ -40,5 +40,33 @@ describe('a component closed in a later block', () => {
     studioMarkdownSetup(md, { annotate: 'all' })
     const html = md.render('# T\n\n<KBox name="free" x="1">\n\nText **bold**\n\n</KBox>\n\nAfter\n')
     expect(html).toMatch(/<KBox name="free" x="1" data-studio-src="2,7"/)
+  })
+})
+
+describe('the text of a placeholder, as a range', () => {
+  const content = '::title::\nT\n\n::body::\n\n- a\n- b\n\n'
+  it('is its named slot without the blank lines', () => {
+    expect(slotRange(content, 'body', false)).toEqual([5, 7])
+    expect(slotRange(content, 'title', false)).toEqual([1, 2])
+    expect(slotRange(content, 'subtitle', false)).toBeNull()
+  })
+  it('is the text before the first slot for the main box', () => {
+    expect(slotRange('Hello\n\n::title::\nT\n', 'body', true)).toEqual([0, 1])
+  })
+  it('looks inside a click wrapper that is already there', () => {
+    expect(slotRange('::body::\n\n<v-clicks>\n\n- a\n- b\n\n</v-clicks>\n', 'body', false)).toEqual([4, 6])
+  })
+  it('knows a box that holds one list', () => {
+    expect(isSingleList(content, [5, 7])).toBe(true)
+    expect(isSingleList('A\n- b', [0, 2])).toBe(false)
+  })
+})
+
+describe('the free layer', () => {
+  it('starts a ::free:: section at the end of the slide', () => {
+    expect(appendToFree('::title::\nT\n', '<A/>')).toBe('::title::\nT\n\n::free::\n\n<A/>\n')
+  })
+  it('appends to the ::free:: section that is already there', () => {
+    expect(appendToFree('::free::\n\n<A/>\n\n::body::\nB\n', '<C/>')).toBe('::free::\n\n<A/>\n\n<C/>\n\n::body::\nB\n')
   })
 })

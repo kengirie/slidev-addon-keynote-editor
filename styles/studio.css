@@ -990,3 +990,11 @@ html.slidev-studio-docked #page-root {
   border: 1px solid #ccc;
   pointer-events: none;
 }
+
+/*
+ * Slidev の右クリックメニュー（z-index 60）は、エディタの選択枠の層（90）より下にあり、
+ * 選んだものの上で右クリックするとメニューが選択枠に隠れて押せなかった。エディタを開いている間は上に出す。
+ */
+html.slidev-studio-docked .z-context-menu {
+  z-index: 99;
+}

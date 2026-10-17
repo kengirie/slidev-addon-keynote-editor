@@ -12,6 +12,7 @@ import {
   returnToFlow,
 } from '../client/actions'
 import { studioContext } from '../client/context'
+import { resetBox, setBoxHidden } from '../client/md/boxes'
 import { selection, studioOpen } from '../client/state'
 
 /**
@@ -53,6 +54,38 @@ export default (items: ComputedRef<ContextMenuItem[]>): ComputedRef<ContextMenuI
 
     const studio = studioContext.value
     const target = selection.value
+
+    /*
+     * A placeholder, or text inside one. Studio's block actions (free position,
+     * duplicate, reorder) would take text out of its box, so a placeholder gets
+     * Keynote's own instead.
+     */
+    const boxEl = target?.kind === 'box' ? target.el : target?.el.closest<HTMLElement>('[data-studio-box]')
+    const box = boxEl?.dataset.studioBox
+    if (studio && boxEl && box) {
+      return [
+        {
+          icon: 'i-carbon:text-annotation-toggle',
+          label: 'テキストを編集',
+          action: () => studio.editBox(boxEl),
+        },
+        {
+          icon: 'i-carbon:reset',
+          label: '選択内容にレイアウトを再適用',
+          action: () => studio.editFrontmatterRaw(raw => resetBox(raw, box), 'Reapply layout'),
+        },
+        {
+          icon: 'i-carbon:trash-can',
+          label: '削除（非表示）',
+          action: () => {
+            selection.value = null
+            return studio.editFrontmatterRaw(raw => setBoxHidden(raw, box, true), 'Delete placeholder')
+          },
+        },
+        'separator',
+        ...slidev,
+      ]
+    }
 
     // Studio is open but nothing is selected, or the block could not be traced
     // back to the Markdown, in which case none of these could be honoured.

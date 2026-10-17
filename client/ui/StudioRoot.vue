@@ -88,6 +88,7 @@ const context: StudioContext = {
   setFrontmatter: (values, label) => source.setFrontmatter(values, label),
   editFrontmatterRaw: (change, label) => source.editFrontmatterRaw(change, label),
   setDragPos: (name, value, label) => source.setDragPos(name, value, label),
+  editBox: box => selectionApi.startBoxEdit(box, { mode: 'end' }),
   setNote: note => source.setNote(note),
   range: () => selection.value?.range ?? null,
   selectInserted: tag => selectionApi.selectInserted(tag),

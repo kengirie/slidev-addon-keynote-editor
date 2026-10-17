@@ -192,7 +192,12 @@ export function useSelection(
   }, { capture: true })
 
   onDomEvent<PointerEvent>(document, 'pointerdown', (event) => {
-    if (!studioOpen.value || event.button !== 0 || editing.value)
+    if (!studioOpen.value || event.button !== 0)
+      return
+    // While text is being edited, a press inside it or on its toolbar belongs
+    // to the editor. A press anywhere else ends the edit (the inline editor
+    // applies it) and, as in Keynote, selects what was pressed.
+    if (editing.value && (!(event.target instanceof Element) || event.target.closest('.studio-editing, .studio-inline')))
       return
     // The overlay and the handles handle themselves.
     if (isStudioChrome(event.target))
@@ -208,7 +213,10 @@ export function useSelection(
       // dropping the click without a word, and let go of what was selected,
       // since leaving the outline behind reads as the click not registering.
       const onSlide = event.target instanceof Element && belongsToSlide(event.target, no())
-      missed.value = onSlide
+      // On a layout of placeholders, empty canvas is simply empty: Keynote
+      // deselects without comment there.
+      const boxLayout = !!slideElement(no())?.querySelector('[data-studio-layout-boxes]')
+      missed.value = onSlide && !boxLayout
       if (onSlide)
         selection.value = null
       return
@@ -337,6 +345,23 @@ export function useSelection(
     const target = selection.value
     selection.value = null
     remove(removeBlock(content(), target.range!), `Delete ${target.label}`)
+  })
+
+  /*
+   * Inside a placeholder, the placeholder is the object, as in Keynote.
+   *
+   * The text in it is only ever reached by editing it. Whenever editing ends,
+   * however it ends, or a write rebinds the selection to a block, a block that
+   * lives inside a placeholder is replaced by the placeholder itself. Left as
+   * the block, Studio's own block tools applied to it: dragging wrapped one
+   * list item in a <v-drag> and took it out of its box.
+   */
+  watch([selection, editing], ([current, isEditing]) => {
+    if (isEditing || !current || current.kind === 'box')
+      return
+    const box = boxFrom(current.el)
+    if (box)
+      selection.value = describeBox(box, no())
   })
 
   watch(studioOpen, (open) => {
@@ -493,7 +518,7 @@ export function useSelection(
   function startBoxEdit(box: HTMLElement, intent: EditIntent) {
     const name = box.dataset.studioBox!
     let block: HTMLElement | null = null
-    if (intent.mode !== 'replace') {
+    if (intent.mode === 'caret' || intent.mode === 'word') {
       for (const node of document.elementsFromPoint(intent.x, intent.y)) {
         if (node.closest('.slidev-studio') || !box.contains(node))
           continue

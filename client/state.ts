@@ -43,6 +43,7 @@ export const editing = ref(false)
 export type EditIntent =
   | { mode: 'caret' | 'word', x: number, y: number }
   | { mode: 'replace', text: string }
+  | { mode: 'end' }
 export const editIntent = shallowRef<EditIntent | null>(null)
 
 /**
