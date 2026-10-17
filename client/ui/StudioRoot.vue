@@ -4,6 +4,7 @@ import { useNav } from '@slidev/client'
 import { useWindowSize } from '@vueuse/core'
 import { computed, onScopeDispose, provide, watch, watchEffect } from 'vue'
 import { duplicateBlock, nudgeBlock } from '../actions'
+import { setBoxHidden, setBoxPos } from '../md/boxes'
 import { onDomEvent } from '../composables/useDomEvent'
 import { useSelection } from '../composables/useSelection'
 import { useSlideCanvas } from '../composables/useSlideCanvas'
@@ -38,6 +39,11 @@ async function commit(content: string, label: string, options?: { skipHmr?: bool
   if (options?.keepSelection || !current)
     return
 
+  // The selection moved on while the write was in flight, as it does when an
+  // edit ends with the placeholder or nothing selected (⌘Return, Escape).
+  if (selection.value !== current)
+    return
+
   await selectionApi.reselect(current.range, current.kind, current.tag)
 }
 
@@ -54,8 +60,21 @@ const gizmo = useTransformGizmo({
   getContent: () => source.content.value,
   getNo: () => no.value,
   commit,
-  selectThrough: (x, y) => selectionApi.selectThrough(x, y),
+  // A click on a placeholder that is already selected goes into its text, with
+  // the insertion point where the click landed (Keynote's second click).
+  selectThrough: (x, y) => {
+    const current = selection.value
+    if (current?.kind === 'box')
+      selectionApi.startBoxEdit(current.el, { mode: 'caret', x, y })
+    else
+      selectionApi.selectThrough(x, y)
+  },
+  writeBox: (name, geometry) => source.editFrontmatterRaw(raw => setBoxPos(raw, name, geometry), 'Move placeholder'),
 })
+
+// Keynote: the press that selects a placeholder can already be a drag.
+selectionApi.hooks.pressBox = event => gizmo.startMove(event, true)
+selectionApi.hooks.hideBox = name => source.editFrontmatterRaw(raw => setBoxHidden(raw, name, true), 'Delete placeholder')
 
 const context: StudioContext = {
   no: () => no.value,
@@ -66,6 +85,7 @@ const context: StudioContext = {
   gizmo,
   commit,
   setFrontmatter: (values, label) => source.setFrontmatter(values, label),
+  editFrontmatterRaw: (change, label) => source.editFrontmatterRaw(change, label),
   setNote: note => source.setNote(note),
   range: () => selection.value?.range ?? null,
   selectInserted: tag => selectionApi.selectInserted(tag),
@@ -98,11 +118,24 @@ onDomEvent<KeyboardEvent>(document, 'keydown', (event) => {
   if (!studioOpen.value || editing.value)
     return
   const target = selection.value
-  if (!target?.range)
+  if (!target?.range && target?.kind !== 'box')
     return
   // A key pressed in a panel field belongs to that field.
   if (event.target instanceof Element && event.target.closest('input, textarea, [contenteditable="true"]'))
     return
+
+  // A placeholder moves 1 pt per arrow, 10 pt with Shift, as in Keynote.
+  if (target.kind === 'box') {
+    const step = event.shiftKey ? NUDGE_FAR : NUDGE
+    const delta = ({ ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] } as Record<string, [number, number]>)[event.key]
+    if (!delta || event.metaKey || event.ctrlKey || event.altKey)
+      return
+    event.preventDefault()
+    // Slidev listens for the arrows further up and would change slide as well.
+    event.stopPropagation()
+    gizmo.nudgeBox(target, delta[0], delta[1])
+    return
+  }
 
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'd') {
     event.preventDefault()
@@ -128,6 +161,8 @@ onDomEvent<KeyboardEvent>(document, 'keydown', (event) => {
     return
 
   event.preventDefault()
+  // Without this Slidev, which listens further up, changed slide on the same key.
+  event.stopPropagation()
   nudgeBlock(context, target, delta[0], delta[1])
 }, { capture: true })
 

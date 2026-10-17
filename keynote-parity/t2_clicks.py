@@ -1,0 +1,11 @@
+from kn import *
+k = Keynote('E313A78E-00B3-45DC-AEAF-3A178DE16F5C')
+k.calibrate(); k.reset()
+crop = lambda n: k.crop(n, 0, 0, 1920, 1080, 0.4)
+crop('t2-0-deselected')
+k.click(900, 700); crop('t2-1-click-empty-area-of-body')
+k.deselect()
+k.click(300, 360); crop('t2-2-click-on-text-unselected')
+k.click(300, 360); crop('t2-3-second-click-on-text')
+k.key('return', 'cmd'); crop('t2-4-cmd-return')
+k.key('esc'); crop('t2-5-esc')

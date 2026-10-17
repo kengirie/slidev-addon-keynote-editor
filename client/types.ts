@@ -13,6 +13,7 @@ export type TargetKind =
   | 'component'
   | 'code'
   | 'frontmatter'
+  | 'box'
   | 'unknown'
 
 export interface StudioTarget {
@@ -31,6 +32,12 @@ export interface StudioTarget {
    * live in the slide's frontmatter, and that is where an edit is written.
    */
   prop?: string
+  /**
+   * The layout placeholder this is, for a box a layout positions by name
+   * (`data-studio-box`). Its geometry lives in the frontmatter, under
+   * `dragPos.<box>`, and it has no `range`.
+   */
+  box?: string
   /** True when the block is wrapped in, or carries, a `v-drag` position. */
   positioned: boolean
   /**

@@ -718,6 +718,14 @@
 .studio-outline--frame {
   position: absolute;
   inset: 0;
+  /* Keynote の選択枠：1px の淡い青（実測 #8FB2FC）、角は丸めない */
+  border-color: #8fb2fc;
+  border-radius: 0;
+}
+
+/* Keynote はポインタを乗せただけでは何も表示しない */
+.studio-hover {
+  display: none;
 }
 
 .studio-move {
@@ -729,26 +737,41 @@
 
 .studio-handle {
   position: absolute;
-  width: 9px;
-  height: 9px;
-  /* Centred on the point it marks: with a 9px box that is half a pixel, and
-     -5px left the grab area sitting up and to the left of the corner. */
-  margin: -4.5px 0 0 -4.5px;
+  /* Keynote のハンドル：7px の白い四角に 1px の黒い縁（実測） */
+  width: 7px;
+  height: 7px;
+  box-sizing: border-box;
+  margin: -3.5px 0 0 -3.5px;
   background: #fff;
-  border: 1px solid var(--studio-accent);
-  border-radius: 2px;
+  border: 1px solid #000;
+  border-radius: 0;
   pointer-events: auto;
 }
 
+/* Keynote には回転用のハンドルが無い（⌘ を押しながらハンドルをドラッグして回転する） */
 .studio-handle--rotate {
-  border-radius: 50%;
-  cursor: grab;
+  display: none;
 }
 
+/* Keynote の整列ガイド：1px の黄色（実機で測った色 #EDC32F） */
 .studio-guide {
   position: fixed;
-  background: #ff3ea5;
+  background: #edc32f;
   pointer-events: none;
+}
+
+/* ドラッグ中の位置表示（Keynote の「x: 560 pt  y: 364 pt」） */
+.studio-readout {
+  position: fixed;
+  padding: 3px 7px;
+  font: 500 11px/1.2 -apple-system, BlinkMacSystemFont, sans-serif;
+  white-space: nowrap;
+  color: #fff;
+  background: rgba(30, 30, 30, .92);
+  border-radius: 5px;
+  transform: translate(-50%, 0);
+  pointer-events: none;
+  z-index: 10;
 }
 
 .studio-badge {
@@ -949,4 +972,21 @@ html.slidev-studio-docked #page-root {
   transform: translateY(var(--studio-deck-offset)) scale(var(--studio-deck-scale));
   transform-origin: 0 0;
   transition: transform 0.15s ease;
+}
+
+/* スライドレイアウトの枠の表示・非表示（Keynote のサイドバーのチェックボックス） */
+.studio-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 0;
+  font-size: 12px;
+}
+
+/* 空のプレースホルダーの枠線（Keynote の編集画面：画面上 1px の #CCCCCC） */
+.studio-placeholder {
+  position: fixed;
+  box-sizing: border-box;
+  border: 1px solid #ccc;
+  pointer-events: none;
 }

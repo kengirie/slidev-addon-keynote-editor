@@ -2,7 +2,7 @@
 import type { ResizeHandle } from '../composables/useTransformGizmo'
 import { useRafFn } from '@vueuse/core'
 import { computed, ref } from 'vue'
-import { mappedElements } from '../dom'
+import { mappedElements, slideElement } from '../dom'
 import { useStudio } from '../context'
 import { editing, hovered, outlineEnabled, selection } from '../state'
 
@@ -52,6 +52,8 @@ function turnedElement(el: HTMLElement): { el: HTMLElement, rotate: number } {
 const selectionRect = ref<Rect | null>(null)
 const hoverRect = ref<Rect | null>(null)
 const outlineRects = ref<Rect[]>([])
+/** Empty placeholders, which Keynote outlines in light grey so they can be found. */
+const emptyRects = ref<Rect[]>([])
 
 /**
  * The element's own box on screen, and its rotation.
@@ -89,6 +91,13 @@ useRafFn(() => {
   outlineRects.value = outlineEnabled.value
     ? mappedElements(studio.no()).map(rectOf).filter((r): r is Rect => !!r)
     : []
+  const slide = slideElement(studio.no())
+  emptyRects.value = slide
+    ? [...slide.querySelectorAll<HTMLElement>('[data-studio-box]')]
+        .filter(el => el.querySelector('.kbox-prompt') && el !== selection.value?.el)
+        .map(rectOf)
+        .filter((r): r is Rect => !!r)
+    : []
 })
 
 const handles: { id: ResizeHandle, x: number, y: number, cursor: string }[] = [
@@ -101,6 +110,18 @@ const handles: { id: ResizeHandle, x: number, y: number, cursor: string }[] = [
   { id: 'sw', x: 0, y: 1, cursor: 'nesw-resize' },
   { id: 'w', x: 0, y: 0.5, cursor: 'ew-resize' },
 ]
+
+/** Keynote shows where a box is going while it is dragged. */
+const readout = computed(() => {
+  const g = studio.gizmo
+  if (!g.active.value || g.kind.value !== 'move' || !g.preview.value)
+    return null
+  const box = g.preview.value
+  return {
+    text: `x: ${Math.round(box.x)} pt  y: ${Math.round(box.y)} pt`,
+    style: { left: `${g.pointer.value.x}px`, top: `${g.pointer.value.y + 18}px` },
+  }
+})
 
 const guideStyles = computed(() => studio.gizmo.guides.value.map((guide) => {
   const { rect, scale } = studio.canvas
@@ -160,11 +181,19 @@ function handleStyle(rect: Rect, handle: typeof handles[number]) {
       :style="{ ...style(rect), opacity: 0.35 }"
     />
 
-    <div v-if="hoverRect" class="studio-outline studio-outline--hover" :style="style(hoverRect)" />
+    <div
+      v-for="(rect, index) in emptyRects"
+      :key="`empty-${index}`"
+      class="studio-placeholder"
+      :style="style(rect)"
+    />
+
+    <div v-if="hoverRect" class="studio-outline studio-outline--hover studio-hover" :style="style(hoverRect)" />
 
     <template v-if="selectionRect && selection && !editing">
       <!-- The label stays upright, so it is readable however the block is turned. -->
       <div
+        v-if="selection.kind !== 'box'"
         class="studio-badge"
         :style="{ left: `${selectionRect.left}px`, top: `${selectionRect.top - 4}px` }"
       >
@@ -194,9 +223,8 @@ function handleStyle(rect: Rect, handle: typeof handles[number]) {
           :key="handle.id"
           class="studio-handle"
           :style="{ left: `${handle.x * 100}%`, top: `${handle.y * 100}%`, cursor: handle.cursor }"
-          @pointerdown="studio.gizmo.startResize($event, handle.id)"
+          @pointerdown="$event.metaKey ? studio.gizmo.startRotate($event) : studio.gizmo.startResize($event, handle.id)"
         />
-
         <div
           class="studio-handle studio-handle--rotate"
           style="left: 50%; top: -22px"
@@ -205,6 +233,10 @@ function handleStyle(rect: Rect, handle: typeof handles[number]) {
         />
       </div>
     </template>
+
+    <div v-if="readout" class="studio-readout" :style="readout.style">
+      {{ readout.text }}
+    </div>
 
     <div
       v-for="(guide, index) in guideStyles"

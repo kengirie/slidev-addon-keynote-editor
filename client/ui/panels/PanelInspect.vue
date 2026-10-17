@@ -9,6 +9,8 @@ import { getBlock, replaceBlock } from '../../md/lines'
 import { canStyle, readClasses, writeClasses } from '../../md/classes'
 import { canReorder, deleteBlock, duplicateBlock, freePosition, moveBlockBy, returnToFlow } from '../../actions'
 import { missed, selection } from '../../state'
+import { parseBoxPos, resetBox, setBoxHidden, setBoxPos } from '../../md/boxes'
+import { layoutBoxes } from '../../dom'
 import PropField from '../parts/PropField.vue'
 import StudioField from '../parts/StudioField.vue'
 import StudioIcon from '../parts/StudioIcon.vue'
@@ -122,10 +124,104 @@ async function remove() {
   if (selection.value)
     await deleteBlock(studio, selection.value)
 }
+
+/* ---- Layout placeholders (Keynote) ---- */
+
+/** The selected placeholder's geometry: where it was moved to, or the layout's default. */
+const boxGeometry = computed(() => {
+  const current = selection.value
+  if (current?.kind !== 'box' || !current.box)
+    return null
+  return parseBoxPos(studio.frontmatter().dragPos?.[current.box])
+    ?? parseBoxPos(current.el.dataset.studioBoxDefault)
+})
+const boxMoved = computed(() => {
+  const name = selection.value?.box
+  return !!name && (studio.frontmatter().dragPos?.[name] != null || studio.frontmatter().boxes?.[name] != null)
+})
+
+async function setBoxField(field: 'x' | 'y' | 'w' | 'h' | 'rotate', value: number) {
+  const name = selection.value?.box
+  if (!name || !boxGeometry.value || !Number.isFinite(value))
+    return
+  const next = { ...boxGeometry.value, [field]: value }
+  await studio.editFrontmatterRaw(raw => setBoxPos(raw, name, next), 'Set placeholder position')
+}
+
+/** Keynote's フォーマット ＞ 選択内容にレイアウトを再適用. */
+async function reapplyLayout() {
+  const name = selection.value?.box
+  if (name)
+    await studio.editFrontmatterRaw(raw => resetBox(raw, name), 'Reapply layout')
+}
+
+async function hideBox() {
+  const name = selection.value?.box
+  if (!name)
+    return
+  selection.value = null
+  await studio.editFrontmatterRaw(raw => setBoxHidden(raw, name, true), 'Delete placeholder')
+}
+
+/** The slide's placeholders, for the show/hide checkboxes Keynote has in the sidebar. */
+const slideBoxes = computed(() => {
+  // Which boxes there are comes from the layout; whether each is shown comes
+  // from the frontmatter itself, which is updated before the slide re-renders.
+  const overrides = studio.frontmatter().boxes ?? {}
+  return layoutBoxes(studio.no()).map(b => ({ ...b, hidden: !!overrides[b.name]?.hide }))
+})
+
+async function toggleBox(name: string, shown: boolean) {
+  await studio.editFrontmatterRaw(raw => setBoxHidden(raw, name, !shown), shown ? 'Show placeholder' : 'Hide placeholder')
+}
 </script>
 
 <template>
-  <div v-if="!selection" class="studio-empty">
+  <template v-if="!selection && slideBoxes.length">
+    <section class="studio-section">
+      <h3 class="studio-section__title">
+        スライドレイアウト
+      </h3>
+      <label v-for="b in slideBoxes" :key="b.name" class="studio-check">
+        <input type="checkbox" :checked="!b.hidden" @change="toggleBox(b.name, ($event.target as HTMLInputElement).checked)">
+        {{ b.prompt || b.name }}
+      </label>
+    </section>
+  </template>
+
+  <section v-if="selection?.kind === 'box' && boxGeometry" class="studio-section">
+    <h3 class="studio-section__title">
+      プレースホルダ「{{ selection.box }}」
+    </h3>
+    <StudioField label="X">
+      <input type="number" :value="Math.round(boxGeometry.x)" @change="setBoxField('x', +($event.target as HTMLInputElement).value)">
+    </StudioField>
+    <StudioField label="Y">
+      <input type="number" :value="Math.round(boxGeometry.y)" @change="setBoxField('y', +($event.target as HTMLInputElement).value)">
+    </StudioField>
+    <StudioField label="幅">
+      <input type="number" :value="Math.round(boxGeometry.w)" @change="setBoxField('w', +($event.target as HTMLInputElement).value)">
+    </StudioField>
+    <StudioField label="高さ">
+      <input type="number" :value="Math.round(boxGeometry.h)" @change="setBoxField('h', +($event.target as HTMLInputElement).value)">
+    </StudioField>
+    <StudioField label="回転">
+      <input type="number" :value="Math.round(boxGeometry.rotate)" @change="setBoxField('rotate', +($event.target as HTMLInputElement).value)">
+    </StudioField>
+    <p class="studio-hint">
+      X・Y は枠の左上、スライドの左上からの pt（Keynote の「配置」と同じ）
+    </p>
+    <div class="studio-button-row">
+      <button class="studio-button" :disabled="!boxMoved" @click="reapplyLayout">
+        選択内容にレイアウトを再適用
+      </button>
+      <button class="studio-button" @click="hideBox">
+        削除（非表示）
+      </button>
+    </div>
+  </section>
+
+  <div v-else-if="!selection" class="studio-empty">
     <template v-if="missed">
       <p>That part of the slide does not come from the Markdown.</p>
       <p class="studio-hint">
@@ -137,6 +233,8 @@ async function remove() {
       Click anything on the slide to select it.
     </template>
   </div>
+
+  <template v-else-if="selection?.kind === 'box'" />
 
   <div v-else-if="selection?.prop" class="studio-empty">
     <p>

@@ -1,3 +1,40 @@
+# slidev-addon-keynote-editor
+
+[slidev-addon-studio](https://github.com/BobTheShoplifter/slidev-addon-studio) をフォークして、**Keynote の操作感**に寄せた Slidev の画面エディタ。
+[slidev-theme-keynote-basic](https://github.com/kengirie/slidev-theme-keynote-basic) / [slidev-addon-boxes](https://github.com/kengirie/slidev-addon-boxes) の「名前付きの枠（プレースホルダー）」を、Keynote と同じように選んで、動かして、文字を編集できる。
+
+![Keynote（左）とこのエディタ（右）で本文のプレースホルダーを選択したところ](./docs/keynote-side-by-side.png)
+
+## Studio から変えたところ
+
+操作はすべて、実物の Keynote 14 を画面操作して測った値に合わせている（[keynote-parity/SPEC.md](./keynote-parity/SPEC.md)）。
+
+- **プレースホルダー**（`data-studio-box` の付いた枠）を選択・移動・サイズ変更・回転できる。結果は frontmatter の `dragPos.<名前>` に、動かした枠だけ書かれる
+- **選択と文字編集の段階**：1 回目のクリックで枠を選択、もう 1 回で文字編集（クリック位置にカーソル）、ダブルクリックで単語選択、枠を選んで打つと中身を置き換え、⌘Return で枠の選択に戻る、Esc で選択解除
+- **空のプレースホルダー**：案内文と薄い枠線を表示し、打つとその枠のスロット（`::subtitle::` など）を作る
+- **修飾キー**：Shift で縦横比固定（Keynote と同じ対角線への投影）、Option で中心基準、⌘＋ハンドルで回転（Shift で 45°）、⌘ でガイドなし
+- **吸着**：Keynote の初期設定と同じく、動かしている枠の中心だけが、スライドの中心とほかのオブジェクトの中心に吸着する（端・3 分割・サイズ変更中は吸着しない）。ガイドは 1px の黄色、ドラッグ中は「x: … pt  y: … pt」を表示
+- **矢印キー**：1pt、Shift で 10pt。スライドが一緒に送られる不具合を修正
+- **インスペクタ**：プレースホルダーの X/Y/幅/高さ/回転（スライド座標の pt）、「選択内容にレイアウトを再適用」、削除（非表示）。何も選んでいないときは、枠ごとの表示・非表示のチェックボックス
+- **見た目**：選択枠 1px #8FB2FC、ハンドル 7px の白い四角に黒い縁、回転ハンドルなし、ホバー表示なし
+- 空行をはさむコンポーネント（`<KBox>` … `</KBox>` など）の行範囲を、閉じタグまで取るように修正（複製・削除でスライドが壊れていた）
+
+## 使い方
+
+```yaml
+---
+theme: slidev-theme-keynote-basic
+addons:
+  - slidev-addon-keynote-editor
+---
+```
+
+`slidev` を起動して E キーでエディタを開く。
+
+---
+
+以下はフォーク元（slidev-addon-studio）の README。
+
 # slidev-addon-studio
 
 ![slidev-addon-studio: a visual editor for Slidev. A slide canvas with a Shape component selected, showing the selection outline and resize handles](./docs/banner.png)

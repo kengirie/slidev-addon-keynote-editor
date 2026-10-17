@@ -117,11 +117,27 @@ export function useSlideSource(no: MaybeRefOrGetter<number>) {
     }
   }
 
+  /**
+   * Rewrites the frontmatter block with a function of its current text.
+   *
+   * For edits a line patch cannot make, such as nested maps like
+   * `dragPos.<name>`. The text is read back from the server first, for the same
+   * reason as above, and the result is recorded for undo.
+   */
+  async function editFrontmatterRaw(change: (raw: string) => string, label: string) {
+    const currentRaw = await currentFrontmatterRaw(slideNo.value) ?? info.value?.frontmatterRaw ?? ''
+    const raw = change(currentRaw)
+    if (raw === currentRaw)
+      return
+    push({ kind: 'frontmatterRaw', label, no: slideNo.value, before: currentRaw, after: raw })
+    await send(slideNo.value, { frontmatterRaw: raw })
+  }
+
   async function setNote(next: string) {
     await send(slideNo.value, { note: next })
   }
 
-  return { info, content, frontmatter, note, setContent, setFrontmatter, setNote }
+  return { info, content, frontmatter, note, setContent, setFrontmatter, editFrontmatterRaw, setNote }
 }
 
 /**

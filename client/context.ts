@@ -24,6 +24,8 @@ export interface StudioContext {
    */
   commit: (content: string, label: string, options?: { skipHmr?: boolean, keepSelection?: boolean }) => Promise<void>
   setFrontmatter: (values: Record<string, any>, label: string) => Promise<void>
+  /** Rewrites the frontmatter block's text, for nested keys such as `dragPos`. */
+  editFrontmatterRaw: (change: (raw: string) => string, label: string) => Promise<void>
   setNote: (note: string) => Promise<void>
   /** Range of the current selection, or `null` when nothing is selected. */
   range: () => SourceRange | null

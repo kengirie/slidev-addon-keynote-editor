@@ -2,11 +2,12 @@ import type { SourceRange, StudioTarget, TargetKind } from '../types'
 import { nextTick, onScopeDispose, watch, watchEffect } from 'vue'
 import { removeBlock } from '../md/lines'
 import { openContextMenu } from '@slidev/client/logic/contextMenu.ts'
-import { belongsToSlide, mappedElements, slideElement } from '../dom'
+import { belongsToSlide, boxElement, mappedElements, slideElement } from '../dom'
 import { onDomEvent } from './useDomEvent'
 import { normalise, resolveRange } from '../md/locate'
 import { readDrag } from '../md/drag'
-import { editing, hovered, missed, selection, studioOpen } from '../state'
+import type { EditIntent } from '../state'
+import { editIntent, editing, editingBox, hovered, missed, selection, studioOpen } from '../state'
 
 /**
  * Turns a click on the rendered slide into a Markdown range Studio can edit.
@@ -44,12 +45,40 @@ function isStudioChrome(target: EventTarget | null): target is Element {
   return target instanceof Element && !!target.closest('.slidev-studio')
 }
 
+/** Hooks the selection needs from parts that are built after it. */
+export interface SelectionHooks {
+  /** A press that selected a layout box starts moving it at once, as in Keynote. */
+  pressBox?: (event: PointerEvent) => void
+  /** Delete on a selected box hides it on this slide. */
+  hideBox?: (name: string) => void
+}
+
 export function useSelection(
   no: () => number,
   content: () => string,
   remove?: (next: string, label: string) => Promise<void>,
 ) {
+  const hooks: SelectionHooks = {}
+
+  /** The layout placeholder a node is in, if any. The innermost one wins. */
+  function boxFrom(node: EventTarget | null): HTMLElement | null {
+    if (!(node instanceof Element))
+      return null
+    const box = node.closest<HTMLElement>('[data-studio-box]')
+    return box && belongsToSlide(box, no()) ? box : null
+  }
+
   function targetFrom(node: EventTarget | null): StudioTarget | null {
+    // Keynote: anything inside a placeholder, its text included, selects the
+    // placeholder itself. The text is reached by clicking again.
+    const box = boxFrom(node)
+    if (box)
+      return describeBox(box, no())
+    return blockFrom(node)
+  }
+
+  /** The Markdown block under a node, ignoring placeholders around it. */
+  function blockFrom(node: EventTarget | null): StudioTarget | null {
     if (!(node instanceof Element))
       return null
 
@@ -189,6 +218,9 @@ export function useSelection(
     event.stopPropagation()
     missed.value = false
     selection.value = target
+    // Keynote moves a placeholder with the same press that selects it.
+    if (target.kind === 'box')
+      hooks.pressBox?.(event)
   }, { capture: true })
 
   onDomEvent<PointerEvent>(document, 'pointermove', (event) => {
@@ -221,6 +253,17 @@ export function useSelection(
     // is looked through rather than treated as the answer: double clicking a
     // nested block inside a selected container edits that block, not the
     // container.
+    // A placeholder: the text goes into editing with the word under the
+    // pointer selected, which is what Keynote does on a double click.
+    const box = selection.value?.kind === 'box' && event.target instanceof Element && event.target.closest('.studio-move')
+      ? selection.value.el
+      : boxFrom(event.target)
+    if (box) {
+      event.preventDefault()
+      startBoxEdit(box, { mode: 'word', x: event.clientX, y: event.clientY })
+      return
+    }
+
     if (event.target instanceof Element && event.target.closest('.studio-move')) {
       const beneath = throughChrome(event.clientX, event.clientY) ?? selection.value
       if (!beneath?.range && !beneath?.prop)
@@ -261,6 +304,26 @@ export function useSelection(
       else
         selection.value = null
       return
+    }
+
+    const current = selection.value
+    if (current?.kind === 'box' && !editing.value && !isTyping(event.target) && !isStudioChrome(event.target)) {
+      // Delete removes the placeholder from this slide (it is hidden, so
+      // reapplying the layout brings it back with its text).
+      if (event.key === 'Backspace' || event.key === 'Delete') {
+        event.preventDefault()
+        event.stopPropagation()
+        hooks.hideBox?.(current.box!)
+        selection.value = null
+        return
+      }
+      // Typing while a placeholder is selected replaces all of its text.
+      if (event.key.length === 1 && !event.metaKey && !event.ctrlKey && !event.altKey) {
+        event.preventDefault()
+        event.stopPropagation()
+        startBoxEdit(current.el, { mode: 'replace', text: event.key })
+        return
+      }
     }
 
     if (event.key !== 'Backspace' && event.key !== 'Delete')
@@ -369,6 +432,15 @@ export function useSelection(
       if (rebinding || !current || document.contains(current.el))
         return
 
+      // A placeholder is found again by name: a write to the frontmatter
+      // rebuilds it, and it has no line range to go by.
+      if (current.kind === 'box' && current.box) {
+        const again = boxElement(no(), current.box)
+        if (again)
+          selection.value = describeBox(again, no())
+        return
+      }
+
       // A selection that failed to trace has no range of its own, so the
       // element's own stamp is the hint. Without it the rebind gave up at once
       // and the selection stayed on a node that had gone.
@@ -412,7 +484,49 @@ export function useSelection(
       selection.value = target
   }
 
-  return { select, targetFrom, reselect, selectInserted, selectThrough }
+  /**
+   * Starts editing a placeholder's text.
+   *
+   * The block under the pointer is the one that is held, or the first block in
+   * the box; an empty box edits its prompt, which typing replaces.
+   */
+  function startBoxEdit(box: HTMLElement, intent: EditIntent) {
+    const name = box.dataset.studioBox!
+    let block: HTMLElement | null = null
+    if (intent.mode !== 'replace') {
+      for (const node of document.elementsFromPoint(intent.x, intent.y)) {
+        if (node.closest('.slidev-studio') || !box.contains(node))
+          continue
+        const mapped = node.closest<HTMLElement>('[data-studio-src]')
+        if (mapped && box.contains(mapped) && boxFrom(mapped) === box) {
+          block = mapped
+          break
+        }
+      }
+    }
+    block ??= [...box.querySelectorAll<HTMLElement>('[data-studio-src]')].find(el => boxFrom(el) === box) ?? null
+
+    editingBox.value = { el: box, name }
+    editIntent.value = intent
+    selection.value = block ? describe(block, no(), content()) : describeBox(box, no())
+    editing.value = true
+  }
+
+  return { select, targetFrom, reselect, selectInserted, selectThrough, startBoxEdit, hooks }
+}
+
+function describeBox(el: HTMLElement, no: number): StudioTarget {
+  const name = el.dataset.studioBox!
+  return {
+    el,
+    no,
+    range: null,
+    kind: 'box',
+    box: name,
+    positioned: true,
+    nested: false,
+    label: name,
+  }
 }
 
 /**

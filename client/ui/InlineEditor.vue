@@ -6,7 +6,8 @@ import { blockShape, canEditContainer, canEditVisually, serialiseBlock, serialis
 import { toggleBullet, toggleHeading, toggleQuote, toggleTagWrap, toggleWrap, toLink } from '../md/format'
 import { replaceInnerHtml, stripStudioAttrs } from '../md/html'
 import { getBlock, replaceBlock } from '../md/lines'
-import { editing, reportError, selection } from '../state'
+import { editIntent, editing, editingBox, reportError, selection } from '../state'
+import { fillBox } from '../md/boxes'
 import { useStudio } from '../context'
 import { onDomEvent } from '../composables/useDomEvent'
 import StudioIcon from './parts/StudioIcon.vue'
@@ -59,7 +60,11 @@ let held: SourceRange | null = null
  * around a different element. Which one is in play decides which serialiser
  * writes the result back.
  */
-let heldKind: 'block' | 'container' | 'prop' | 'html' = 'block'
+let heldKind: 'block' | 'container' | 'prop' | 'html' | 'prompt' = 'block'
+
+/** For an empty placeholder: its name, and the prompt it showed. */
+let promptBox = ''
+let promptText = ''
 
 /** For an edit inside raw HTML: the element's tag, and the words it held. */
 let htmlTag = ''
@@ -75,6 +80,32 @@ const editingProp = computed(() => !!selection.value?.prop)
 watch(editing, async (open) => {
   if (!open) {
     release()
+    editIntent.value = null
+    editingBox.value = null
+    return
+  }
+
+  /*
+   * An empty placeholder. What shows is its prompt, which is not in the
+   * Markdown at all; typing replaces it, and what was typed becomes the box's
+   * own slot.
+   */
+  if (selection.value?.kind === 'box') {
+    const prompt = selection.value.el.querySelector<HTMLElement>('.kbox-prompt')
+    if (!prompt)
+      return
+    heldKind = 'prompt'
+    held = null
+    shape.value = null
+    promptBox = selection.value.box!
+    promptText = prompt.textContent ?? ''
+    source = ''
+    mode.value = 'visual'
+    const at = prompt.getBoundingClientRect()
+    rect.value = { left: at.left, top: at.top, width: Math.max(at.width, 260) }
+    await nextTick()
+    hold(prompt)
+    applyIntent(prompt, true)
     return
   }
 
@@ -187,11 +218,60 @@ watch(editing, async (open) => {
   mode.value = heldKind === 'container' || heldKind === 'html' || blockFits ? 'visual' : 'markdown'
 
   await nextTick()
-  if (mode.value === 'visual')
+  if (mode.value === 'visual') {
     hold(element, element === picked ? undefined : picked)
-  else
+    applyIntent(element, false)
+  }
+  else {
     box.value?.focus()
+  }
 })
+
+/**
+ * Puts the caret or the selection where Keynote would.
+ *
+ * A click lands the insertion point under the pointer, a double click selects
+ * the word there, and typing on a selected box replaces everything in it.
+ */
+function applyIntent(element: HTMLElement, isPrompt: boolean) {
+  const intent = editIntent.value
+  editIntent.value = null
+  const chosen = window.getSelection()
+  if (!chosen)
+    return
+
+  // A prompt is never edited, only replaced: it comes up wholly selected.
+  if (isPrompt || intent?.mode === 'replace') {
+    const all = document.createRange()
+    all.selectNodeContents(element)
+    chosen.removeAllRanges()
+    chosen.addRange(all)
+    if (intent?.mode === 'replace' && intent.text)
+      document.execCommand('insertText', false, intent.text)
+    return
+  }
+  if (!intent)
+    return
+
+  const at = document.caretRangeFromPoint?.(intent.x, intent.y)
+  if (!at || !element.contains(at.startContainer))
+    return
+  chosen.removeAllRanges()
+  chosen.addRange(at)
+
+  if (intent.mode === 'word' && at.startContainer.nodeType === Node.TEXT_NODE) {
+    const text = at.startContainer.textContent ?? ''
+    const segments = new Intl.Segmenter(undefined, { granularity: 'word' }).segment(text)
+    const word = segments.containing(Math.min(at.startOffset, Math.max(0, text.length - 1)))
+    if (word) {
+      const range = document.createRange()
+      range.setStart(at.startContainer, word.index)
+      range.setEnd(at.startContainer, word.index + word.segment.length)
+      chosen.removeAllRanges()
+      chosen.addRange(range)
+    }
+  }
+}
 
 /**
  * The Markdown a non-text child of a container stands for.
@@ -335,6 +415,16 @@ function release() {
 }
 
 async function apply() {
+  if (heldKind === 'prompt') {
+    const typed = (editable?.innerText ?? '').replace(/\n{3,}/g, '\n\n').trim()
+    const name = promptBox
+    release()
+    editing.value = false
+    if (typed && typed !== promptText.trim())
+      await studio.commit(fillBox(studio.content(), name, typed), 'Fill placeholder')
+    return
+  }
+
   if (heldKind === 'prop') {
     const key = selection.value?.prop
     const written = (editable?.textContent ?? '').replace(/\s+/g, ' ').trim()
@@ -393,6 +483,18 @@ async function apply() {
 
   if (written !== source)
     await studio.commit(replaceBlock(studio.content(), target, written), 'Edit text')
+}
+
+/** Applies the edit, then leaves the selection the way Keynote does. */
+async function finish(then: 'none' | 'box') {
+  const box = editingBox.value
+  editingBox.value = null
+  const pending = apply()
+  if (then === 'none' || !box)
+    selection.value = null
+  else
+    selection.value = { el: box.el, no: studio.no(), range: null, kind: 'box', box: box.name, positioned: true, nested: false, label: box.name }
+  await pending
 }
 
 function cancel() {
@@ -525,12 +627,14 @@ function onKeydown(event: KeyboardEvent) {
     // with this box", and undo is how you take an edit back. Discarding a whole
     // typing session on one keystroke, with no warning and nothing on the undo
     // stack, is the one way this editor could lose work outright.
-    apply()
+    // Keynote then has nothing selected at all.
+    finish('none')
     return
   }
   if (modifier && event.key === 'Enter') {
     event.preventDefault()
-    apply()
+    // Keynote's ⌘Return: out of the text, with the box itself selected.
+    finish('box')
     return
   }
   /*

@@ -23,7 +23,23 @@ export function mappedElements(no: number): HTMLElement[] {
   // `data-studio-prop` is how a theme says "these words are a frontmatter key".
   // Such an element has no line range, so it would never be found by the first
   // selector, and text rendered from a layout's props could not be clicked.
-  return root ? [...root.querySelectorAll<HTMLElement>('[data-studio-src], [data-studio-prop]')] : []
+  return root ? [...root.querySelectorAll<HTMLElement>('[data-studio-src], [data-studio-prop], [data-studio-box]')] : []
+}
+
+/** A layout placeholder on that slide, by name. */
+export function boxElement(no: number, name: string): HTMLElement | null {
+  return slideElement(no)?.querySelector<HTMLElement>(`[data-studio-box="${CSS.escape(name)}"]`) ?? null
+}
+
+/** The layout's own list of its placeholders, hidden ones included. */
+export function layoutBoxes(no: number): { name: string, prompt: string, hidden: boolean }[] {
+  const raw = slideElement(no)?.querySelector<HTMLElement>('[data-studio-layout-boxes]')?.dataset.studioLayoutBoxes
+  try {
+    return raw ? JSON.parse(raw) : []
+  }
+  catch {
+    return []
+  }
 }
 
 /** Whether a node belongs to the slide currently being edited. */

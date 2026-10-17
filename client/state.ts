@@ -27,6 +27,25 @@ export const missed = shallowRef(false)
 
 /** The selection's text is being edited in place. */
 export const editing = ref(false)
+
+/**
+ * How text editing should start, Keynote style.
+ *
+ * - `caret`: a click on the text of a box that is already selected puts the
+ *   insertion point where it landed
+ * - `word`: a double click selects the word under the pointer
+ * - `replace`: typing while a box is selected replaces all of its text
+ */
+export type EditIntent =
+  | { mode: 'caret' | 'word', x: number, y: number }
+  | { mode: 'replace', text: string }
+export const editIntent = shallowRef<EditIntent | null>(null)
+
+/**
+ * The placeholder whose text is being edited, so ⌘Return can go back to
+ * having the box itself selected, as Keynote does.
+ */
+export const editingBox = shallowRef<{ el: HTMLElement, name: string } | null>(null)
 export const hovered = shallowRef<StudioTarget | null>(null)
 
 /** A write is in flight; the UI blocks further edits until it lands. */
@@ -48,4 +67,4 @@ export function clearSelection() {
 // A single place to look when something in the editor is not behaving: the
 // live state is on `window.__studio__` while the dev server is running.
 if (typeof window !== 'undefined')
-  (window as any).__studio__ = { studioOpen, activePanel, selection, hovered, busy, lastError, editing, missed }
+  (window as any).__studio__ = { studioOpen, activePanel, selection, hovered, busy, lastError, editing, missed, editIntent, editingBox }

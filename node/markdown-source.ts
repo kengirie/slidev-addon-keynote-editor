@@ -174,8 +174,22 @@ function annotateTokens(tokens: Token[], annotate: 'all' | 'html' | 'off', lines
     // around it. Slidev treats both the same way for `v-drag`, and so must
     // this, or a component written on one line would be invisible here.
     if (HTML_TOKENS.has(token.type) && annotate !== 'off')
-      token.content = annotateHtmlBlock(token.content, start, annotate)
+      token.content = annotateHtmlBlock(token.content, start, annotate, lines)
   }
+}
+
+/** The line holding the tag that closes `name`, counting nested ones of the same name. */
+function closingLine(lines: string[], from: number, name: string): number | null {
+  const open = new RegExp(`<${name}(?=[\\s>/])`, 'g')
+  const close = new RegExp(`</${name}\\s*>`, 'g')
+  let depth = 1
+  for (let i = from; i < lines.length; i++) {
+    depth += (lines[i].match(open)?.length ?? 0)
+    depth -= (lines[i].match(close)?.length ?? 0)
+    if (depth <= 0)
+      return i
+  }
+  return null
 }
 
 /**
@@ -186,7 +200,7 @@ function annotateTokens(tokens: Token[], annotate: 'all' | 'html' | 'off', lines
  * meant a click on any of those components resolved to the wrapper instead, and
  * their props were unreachable.
  */
-function annotateHtmlBlock(html: string, blockStart: number, annotate: 'all' | 'html') {
+function annotateHtmlBlock(html: string, blockStart: number, annotate: 'all' | 'html', lines: string[] = []) {
   const tags = scanTags(html)
   if (!tags.length)
     return html
@@ -207,7 +221,15 @@ function annotateHtmlBlock(html: string, blockStart: number, annotate: 'all' | '
       continue
 
     const start = blockStart + tag.startLine
-    const end = blockStart + Math.max(tag.startLine + 1, tag.endLine)
+    let end = blockStart + Math.max(tag.startLine + 1, tag.endLine)
+    // Closed in a later block: the element runs to its closing tag, or a
+    // duplicate or a delete would take the opening tag alone and leave the
+    // slide with markup Vue cannot compile.
+    if (tag.unclosed) {
+      const closing = closingLine(lines, blockStart + tag.startLine + 1, tag.name)
+      if (closing !== null)
+        end = closing + 1
+    }
     // The scanner already knows where the tag opens. Searching back for the
     // nearest `<` found the one inside `label="a < b"` instead, and the
     // fingerprint was then computed from a fragment of an attribute value,

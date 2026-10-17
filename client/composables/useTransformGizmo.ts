@@ -1,4 +1,5 @@
 import type { DragPos, StudioTarget } from '../types'
+import type { BoxGeometry } from '../md/boxes'
 import type { Box, Guide } from './useSnapping'
 import type { useSlideCanvas } from './useSlideCanvas'
 import { ref, shallowRef } from 'vue'
@@ -54,6 +55,8 @@ export function useTransformGizmo(context: {
   commit: (content: string, label: string, options?: { skipHmr?: boolean, keepSelection?: boolean }) => Promise<void>
   /** Selects what lies under a point, for a press on the overlay that was a click. */
   selectThrough: (x: number, y: number) => void
+  /** Writes a layout placeholder's new geometry (`dragPos.<name>`). */
+  writeBox: (name: string, geometry: BoxGeometry) => Promise<void>
 }) {
   const { canvas } = context
 
@@ -62,6 +65,9 @@ export function useTransformGizmo(context: {
   const active = ref(false)
   const guides = shallowRef<Guide[]>([])
   const preview = shallowRef<Box | null>(null)
+  /** What is being done and where the pointer is, for the position readout. */
+  const kind = ref<Gesture['type'] | null>(null)
+  const pointer = ref({ x: 0, y: 0 })
 
   let gesture: Gesture | null = null
   let target: StudioTarget | null = null
@@ -79,8 +85,13 @@ export function useTransformGizmo(context: {
   let restore = ''
   let startNo = 0
   let lastPress = { at: 0, x: 0, y: 0 }
+  /** The press that started this gesture is also the one that selected it. */
+  let fresh = false
+  /** Rotation and pointer angle when a rotation started, so it turns by the change. */
+  let rotateFrom = 0
+  let angleFrom: number | null = null
 
-  function start(event: PointerEvent, next: Gesture) {
+  function start(event: PointerEvent, next: Gesture, selectedNow = false) {
     // Only the primary button drags. A right-click on the selection overlay
     // otherwise armed a gesture and swallowed the event that opens the context
     // menu, so the menu never appeared over the very thing it is about.
@@ -88,7 +99,7 @@ export function useTransformGizmo(context: {
       return
 
     const current = context.getTarget()
-    if (!current || !current.range)
+    if (!current || (!current.range && current.kind !== 'box'))
       return
 
     // The second press of a double click is not a gesture. Left armed, a hand
@@ -106,9 +117,31 @@ export function useTransformGizmo(context: {
 
     target = current
     gesture = next
+    kind.value = next.type
+    rotateFrom = 0
+    angleFrom = null
+    fresh = selectedNow
     armed.value = true
 
-    const existing = readDrag(context.getContent(), current.range)
+    // A layout placeholder already has a position: the box itself, in slide
+    // units. Nothing wraps it and its height is fixed, as in Keynote.
+    if (current.kind === 'box') {
+      hadPosition = true
+      wrapped = false
+      painted = current.el
+      padding = 0
+      startBox = canvas.boxOf(painted)
+      startRotate = rotationOfStyle(painted)
+      autoHeight = false
+      pointerStart = { x: event.clientX, y: event.clientY }
+      preview.value = { ...startBox }
+      startNo = current.no
+      others = collectOthers(current.el, current.no)
+      restore = painted.getAttribute('style') ?? ''
+      return
+    }
+
+    const existing = readDrag(context.getContent(), current.range!)
     hadPosition = !!existing
     // Elements and components take the directive and are positioned directly;
     // a Markdown block gets a wrapper, whose padding sits outside it.
@@ -157,14 +190,24 @@ export function useTransformGizmo(context: {
       begin()
     }
 
+    pointer.value = { x: event.clientX, y: event.clientY }
     const dx = (event.clientX - pointerStart.x) / canvas.scale.value
     const dy = (event.clientY - pointerStart.y) / canvas.scale.value
 
     if (gesture.type === 'rotate') {
       const centreX = canvas.rect.value.left + (startBox.x + startBox.w / 2) * canvas.scale.value
       const centreY = canvas.rect.value.top + (startBox.y + startBox.h / 2) * canvas.scale.value
-      const angle = Math.atan2(event.clientY - centreY, event.clientX - centreX) * 180 / Math.PI + 90
-      startRotate = event.shiftKey ? Math.round(angle / 15) * 15 : Math.round(angle)
+      const angleAt = (x: number, y: number) => Math.atan2(y - centreY, x - centreX) * 180 / Math.PI
+      // Keynote rotates with ⌘ on any handle, by how far the pointer has turned
+      // about the centre since the press.
+      if (angleFrom === null) {
+        rotateFrom = startRotate
+        angleFrom = angleAt(pointerStart.x, pointerStart.y)
+      }
+      const angle = rotateFrom + angleAt(event.clientX, event.clientY) - angleFrom
+      const normal = ((angle % 360) + 360) % 360
+      // Keynote: Shift while rotating turns in 45° steps.
+      startRotate = event.shiftKey ? (Math.round(normal / 45) * 45) % 360 : Math.round(normal)
       paint(preview.value ?? startBox, startRotate)
       return
     }
@@ -184,7 +227,8 @@ export function useTransformGizmo(context: {
       const angle = (-startRotate * Math.PI) / 180
       const localX = dx * Math.cos(angle) - dy * Math.sin(angle)
       const localY = dx * Math.sin(angle) + dy * Math.cos(angle)
-      box = resize(startBox, gesture.handle, localX, localY, event.shiftKey)
+      // Keynote: Shift keeps the ratio, Option resizes about the centre.
+      box = resize(startBox, gesture.handle, localX, localY, event.shiftKey, event.altKey)
       edges = {
         left: gesture.handle.includes('w'),
         right: gesture.handle.includes('e'),
@@ -193,13 +237,16 @@ export function useTransformGizmo(context: {
       }
     }
 
-    if (snapEnabled.value && !event.altKey) {
+    // Keynote turns the guides off while ⌘ is held during a drag, and does
+    // not snap a resize at all: only a moving object's centre is guided.
+    if (snapEnabled.value && !event.metaKey && gesture.type === 'move') {
       const result = snapBox(box, {
         canvas: { w: canvas.slideWidth.value, h: canvas.slideHeight.value },
         others,
         threshold: 6 / canvas.scale.value,
         grid: gridEnabled.value ? gridSize.value : undefined,
         edges,
+        centresOnly: true,
       })
       box = result.box
       guides.value = result.guides
@@ -221,9 +268,13 @@ export function useTransformGizmo(context: {
     // also the only way to reach anything under the overlay, which covers the
     // whole selection: clicking again selects what is beneath the pointer.
     if (!active.value) {
-      if (gesture?.type === 'move' && lastPress.at)
+      // The press that selected something is only a selection. A further
+      // click on what is already selected goes through to what is beneath it,
+      // which for a placeholder is its text.
+      if (gesture?.type === 'move' && lastPress.at && !fresh)
         context.selectThrough(lastPress.x, lastPress.y)
       armed.value = false
+      kind.value = null
       gesture = null
       preview.value = null
       target = null
@@ -234,7 +285,7 @@ export function useTransformGizmo(context: {
     // The deck can move under a gesture: a remote, an autoplay, a stray arrow
     // key. Writing then means writing this slide's line range into whatever
     // slide is now current, so the gesture is abandoned instead.
-    if (!target?.range || context.getNo() !== startNo) {
+    if ((!target?.range && target?.kind !== 'box') || context.getNo() !== startNo) {
       if (painted && !hadPosition)
         painted.setAttribute('style', restore)
       armed.value = false
@@ -255,8 +306,19 @@ export function useTransformGizmo(context: {
     const changedHeight = gesture?.type === 'resize' && /[ns]/.test(gesture.handle)
     armed.value = false
     active.value = false
+    kind.value = null
     guides.value = []
     gesture = null
+
+    // A placeholder is written to the frontmatter. Its painted style stays
+    // until the slide is rebuilt from the new value, so nothing jumps back.
+    if (target.kind === 'box' && target.box) {
+      const name = target.box
+      target = null
+      await context.writeBox(name, { x: box.x, y: box.y, w: box.w, h: box.h, rotate: startRotate })
+      preview.value = null
+      return
+    }
 
     // Only when the wrapper does not exist yet does the written box need to
     // grow by the padding it will add.
@@ -282,7 +344,7 @@ export function useTransformGizmo(context: {
     }
 
     const content = context.getContent()
-    const next = writeDrag(content, target.range, pos)
+    const next = writeDrag(content, target.range!, pos)
     const label = wasResize ? 'Resize element' : 'Move element'
 
     // An element that already had a position only changes its numbers, and the
@@ -319,6 +381,7 @@ export function useTransformGizmo(context: {
 
     armed.value = false
     active.value = false
+    kind.value = null
     guides.value = []
     gesture = null
     preview.value = null
@@ -388,14 +451,47 @@ export function useTransformGizmo(context: {
     painted.style.width = `${box.w}px`
     if (!autoHeight)
       painted.style.height = `${box.h}px`
+    painted.style.zIndex = '100'
+
     painted.style.transform = rotate ? `rotate(${rotate}deg)` : ''
     painted.style.transformOrigin = 'center center'
   }
 
+  /**
+   * What a moving object is aligned against: the other objects on the slide.
+   * Text inside a placeholder is not an object of its own, the placeholder is.
+   */
   function collectOthers(self: HTMLElement, no: number): Box[] {
     return mappedElements(no)
       .filter(el => el !== self && !el.contains(self) && !self.contains(el))
+      .filter(el => el.matches('[data-studio-box]') || !el.closest('[data-studio-box]'))
       .map(el => canvas.boxOf(el))
+  }
+
+  /**
+   * Moves a placeholder by a few units, for the arrow keys.
+   *
+   * Painted at once, so holding a key moves the box smoothly, and written once
+   * the key has been let go of, since every write rebuilds the slide.
+   */
+  let nudgeTimer: ReturnType<typeof setTimeout> | undefined
+  let nudging: { name: string, el: HTMLElement, box: Box, rotate: number } | null = null
+  function nudgeBox(current: StudioTarget, dx: number, dy: number) {
+    if (current.kind !== 'box' || !current.box)
+      return
+    if (!nudging || nudging.name !== current.box || !document.contains(nudging.el))
+      nudging = { name: current.box, el: current.el, box: canvas.boxOf(current.el), rotate: rotationOfStyle(current.el) }
+    nudging.box = { ...nudging.box, x: nudging.box.x + dx, y: nudging.box.y + dy }
+    const origin = canvas.originOf(nudging.el)
+    nudging.el.style.left = `${nudging.box.x - origin.x}px`
+    nudging.el.style.top = `${nudging.box.y - origin.y}px`
+    clearTimeout(nudgeTimer)
+    nudgeTimer = setTimeout(() => {
+      const done = nudging
+      nudging = null
+      if (done)
+        context.writeBox(done.name, { ...done.box, rotate: done.rotate })
+    }, 350)
   }
 
   return {
@@ -403,7 +499,10 @@ export function useTransformGizmo(context: {
     armed,
     guides,
     preview,
-    startMove: (event: PointerEvent) => start(event, { type: 'move' }),
+    kind,
+    pointer,
+    nudgeBox,
+    startMove: (event: PointerEvent, selectedNow = false) => start(event, { type: 'move' }, selectedNow),
     startResize: (event: PointerEvent, handle: ResizeHandle) => start(event, { type: 'resize', handle }),
     startRotate: (event: PointerEvent) => start(event, { type: 'rotate' }),
   }
@@ -421,7 +520,16 @@ const MIN_SIZE = 16
  * minimum, or holding Shift to keep the ratio, slid the element sideways
  * instead of resizing it in place.
  */
-export function resize(box: Box, handle: ResizeHandle, dx: number, dy: number, keepRatio: boolean): Box {
+export function resize(box: Box, handle: ResizeHandle, dx: number, dy: number, keepRatio: boolean, fromCentre = false): Box {
+  // About the centre, both opposite edges move: twice the change in size, and
+  // the centre stays where it was.
+  if (fromCentre) {
+    const grown = resize(box, handle, dx * 2, dy * 2, keepRatio)
+    const cx = box.x + box.w / 2
+    const cy = box.y + box.h / 2
+    return { x: cx - grown.w / 2, y: cy - grown.h / 2, w: grown.w, h: grown.h }
+  }
+
   const right = box.x + box.w
   const bottom = box.y + box.h
 
@@ -440,8 +548,16 @@ export function resize(box: Box, handle: ResizeHandle, dx: number, dy: number, k
     const ratio = box.w / box.h
     if (handle === 'n' || handle === 's')
       w = h * ratio
-    else
+    else if (handle === 'e' || handle === 'w')
       h = w / ratio
+    else {
+      // A corner keeps the ratio the way Keynote does: the pointer's size is
+      // projected onto the diagonal, so both directions of the drag count.
+      // (1730×650 dragged by -100,-50 gives 1626×611, as measured in Keynote.)
+      const k = (w * box.w + h * box.h) / (box.w * box.w + box.h * box.h)
+      w = box.w * k
+      h = box.h * k
+    }
   }
 
   w = Math.max(MIN_SIZE, w)
@@ -453,4 +569,10 @@ export function resize(box: Box, handle: ResizeHandle, dx: number, dy: number, k
     w,
     h,
   }
+}
+
+/** The rotation a placeholder is drawn with, from its inline `rotate(…deg)`. */
+function rotationOfStyle(el: HTMLElement): number {
+  const match = el.style.transform.match(/rotate\((-?[\d.]+)deg\)/)
+  return match ? Number(match[1]) : 0
 }

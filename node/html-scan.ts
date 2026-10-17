@@ -25,6 +25,12 @@ export interface ScannedTag {
   insertAt: number
   attrs: string
   selfClosing: boolean
+  /**
+   * The element is still open at the end of the chunk. Markdown ends an HTML
+   * block at a blank line, so `<Box>`, a blank line, some Markdown and
+   * `</Box>` arrives as separate tokens and the closing tag is in a later one.
+   */
+  unclosed?: boolean
 }
 
 /**
@@ -96,6 +102,9 @@ export function scanTags(html: string): ScannedTag[] {
     if (!tag.selfClosing && !VOID_TAGS.has(name.toLowerCase()))
       open.push(tag)
   }
+
+  for (const tag of open)
+    tag.unclosed = true
 
   return found
 }

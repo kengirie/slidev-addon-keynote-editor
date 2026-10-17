@@ -30,6 +30,12 @@ export interface SnapOptions {
   grid?: number
   /** Which edges may move; a move gesture allows all, a resize only some. */
   edges?: { left?: boolean, right?: boolean, top?: boolean, bottom?: boolean }
+  /**
+   * Keynote's default guides: only centres. The moving box's centre latches
+   * onto the slide's centre and onto the centres of the other objects; edges,
+   * slide edges and thirds are not guides (measured in Keynote 14).
+   */
+  centresOnly?: boolean
 }
 
 /**
@@ -45,27 +51,35 @@ export function snapBox(box: Box, options: SnapOptions): SnapResult {
   const edges = options.edges ?? { left: true, right: true, top: true, bottom: true }
   const guides: Guide[] = []
 
-  const verticalCandidates = [
-    0,
-    canvas.w / 3,
-    canvas.w / 2,
-    (canvas.w / 3) * 2,
-    canvas.w,
-    ...others.flatMap(other => [other.x, other.x + other.w / 2, other.x + other.w]),
-  ]
-  const horizontalCandidates = [
-    0,
-    canvas.h / 3,
-    canvas.h / 2,
-    (canvas.h / 3) * 2,
-    canvas.h,
-    ...others.flatMap(other => [other.y, other.y + other.h / 2, other.y + other.h]),
-  ]
+  const centresOnly = !!options.centresOnly
+  const verticalCandidates = centresOnly
+    ? [canvas.w / 2, ...others.map(other => other.x + other.w / 2)]
+    : [
+        0,
+        canvas.w / 3,
+        canvas.w / 2,
+        (canvas.w / 3) * 2,
+        canvas.w,
+        ...others.flatMap(other => [other.x, other.x + other.w / 2, other.x + other.w]),
+      ]
+  const horizontalCandidates = centresOnly
+    ? [canvas.h / 2, ...others.map(other => other.y + other.h / 2)]
+    : [
+        0,
+        canvas.h / 3,
+        canvas.h / 2,
+        (canvas.h / 3) * 2,
+        canvas.h,
+        ...others.flatMap(other => [other.y, other.y + other.h / 2, other.y + other.h]),
+      ]
 
   const result: Box = { ...box }
 
   const movingX: { value: number, apply: (delta: number) => void }[] = []
-  if (edges.left && edges.right) {
+  if (edges.left && edges.right && centresOnly) {
+    movingX.push({ value: box.x + box.w / 2, apply: d => (result.x += d) })
+  }
+  else if (edges.left && edges.right) {
     movingX.push(
       { value: box.x, apply: d => (result.x += d) },
       { value: box.x + box.w / 2, apply: d => (result.x += d) },
@@ -80,7 +94,10 @@ export function snapBox(box: Box, options: SnapOptions): SnapResult {
   }
 
   const movingY: { value: number, apply: (delta: number) => void }[] = []
-  if (edges.top && edges.bottom) {
+  if (edges.top && edges.bottom && centresOnly) {
+    movingY.push({ value: box.y + box.h / 2, apply: d => (result.y += d) })
+  }
+  else if (edges.top && edges.bottom) {
     movingY.push(
       { value: box.y, apply: d => (result.y += d) },
       { value: box.y + box.h / 2, apply: d => (result.y += d) },
