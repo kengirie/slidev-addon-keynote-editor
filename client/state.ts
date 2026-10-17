@@ -4,8 +4,12 @@ import { ref, shallowRef } from 'vue'
 
 export type PanelId = 'inspect' | 'components' | 'animate' | 'layout' | 'slides' | 'assets'
 
-/** Studio is off until asked for, so a normal `slidev` session is unchanged. */
-export const studioOpen = useLocalStorage('slidev-studio:open', false)
+/**
+ * Open from the start, as Keynote always is: `slidev` in dev is the editing
+ * view, and E closes it to look at the slide alone. (A new key, so a browser
+ * that ran Studio before does not keep its closed state.)
+ */
+export const studioOpen = useLocalStorage('slidev-keynote-editor:open', true)
 export const activePanel = useLocalStorage<PanelId>('slidev-studio:panel', 'inspect')
 export const dockWidth = useLocalStorage('slidev-studio:dock-width', 320)
 

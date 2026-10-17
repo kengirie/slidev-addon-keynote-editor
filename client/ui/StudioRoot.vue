@@ -180,6 +180,10 @@ const viewport = useWindowSize()
 watchEffect(() => {
   const root = document.documentElement
   root.classList.toggle('slidev-studio-docked', studioOpen.value)
+  // The editor is present even while closed. Layout boxes then leave Slidev's
+  // own v-drag off, whose double click would otherwise open a move mode that
+  // has nothing to do with this editor.
+  root.classList.add('slidev-keynote-editor')
 
   if (!studioOpen.value) {
     root.style.removeProperty('--studio-dock-width')

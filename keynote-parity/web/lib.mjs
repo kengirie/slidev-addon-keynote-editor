@@ -21,7 +21,9 @@ export async function open(no = 2, { editor = true } = {}) {
   page.on('console', m => { if (m.type() === 'error' && !/FloatingVue|Wake Lock/.test(m.text())) errors.push(m.text().slice(0, 300)) })
   await page.goto(`${URL}/${no}`, { waitUntil: 'networkidle' })
   await sleep(1200)
-  if (editor) { await page.keyboard.press('e'); await sleep(1200) }
+  // エディタは最初から開いている。閉じたいときだけ E を押す
+  const isOpen = await page.evaluate(() => document.documentElement.classList.contains('slidev-studio-docked'))
+  if (isOpen !== editor) { await page.keyboard.press('e'); await sleep(1200) }
   const api = {
     browser, page, errors,
     /** スライド座標 → 画面座標（エディタの縮小表示込み） */
