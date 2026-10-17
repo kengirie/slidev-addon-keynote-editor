@@ -3,6 +3,7 @@ import type { MaybeRefOrGetter } from 'vue'
 import { useDynamicSlideInfo } from '@slidev/client/composables/useSlideInfo.ts'
 import { computed, ref, toValue } from 'vue'
 import { patchFrontmatterRaw } from '../md/frontmatter'
+import { setDragPosMap } from '../md/boxes'
 import { busy, reportError } from '../state'
 
 /**
@@ -125,7 +126,14 @@ export function useSlideSource(no: MaybeRefOrGetter<number>) {
    * reason as above, and the result is recorded for undo.
    */
   async function editFrontmatterRaw(change: (raw: string) => string, label: string) {
-    const currentRaw = await currentFrontmatterRaw(slideNo.value) ?? info.value?.frontmatterRaw ?? ''
+    const fresh = await fetch(`/__slidev/slides/${slideNo.value}.json`).then(r => r.json()).catch(() => null)
+    let currentRaw: string = typeof fresh?.frontmatterRaw === 'string' ? fresh.frontmatterRaw : (info.value?.frontmatterRaw ?? '')
+    // Positions written in place are in the server's frontmatter before they
+    // are in the text it reports, so the text is caught up first. Editing the
+    // stale text would quietly drop every box moved since the last rebuild.
+    const dragPos = fresh?.frontmatter?.dragPos
+    if (dragPos && typeof dragPos === 'object')
+      currentRaw = setDragPosMap(currentRaw, dragPos)
     const raw = change(currentRaw)
     if (raw === currentRaw)
       return
@@ -133,11 +141,46 @@ export function useSlideSource(no: MaybeRefOrGetter<number>) {
     await send(slideNo.value, { frontmatterRaw: raw })
   }
 
+  /**
+   * Moves a layout placeholder without rebuilding the slide.
+   *
+   * The same write Slidev's own `v-drag` makes: the whole `dragPos` map as a
+   * frontmatter patch, with HMR skipped. The server updates the file and its
+   * own copy of the frontmatter, and the box the gesture already painted stays
+   * where it was dropped, so nothing on screen is rebuilt or flickers.
+   *
+   * Undo and redo are recorded as raw frontmatter, which does rebuild: going
+   * back is the one time the slide has to be drawn from the file again.
+   */
+  async function setDragPos(name: string, value: string | null, label: string) {
+    const fresh = await fetch(`/__slidev/slides/${slideNo.value}.json`).then(r => r.json()).catch(() => null)
+    const reportedRaw: string = typeof fresh?.frontmatterRaw === 'string' ? fresh.frontmatterRaw : (info.value?.frontmatterRaw ?? '')
+    const before: Record<string, string> = { ...(fresh?.frontmatter?.dragPos ?? info.value?.frontmatter?.dragPos ?? {}) }
+    if (before[name] === value)
+      return
+    const current = { ...before }
+    if (value === null)
+      delete current[name]
+    else
+      current[name] = value
+    push({
+      kind: 'frontmatterRaw',
+      label,
+      no: slideNo.value,
+      before: setDragPosMap(reportedRaw, before),
+      after: setDragPosMap(reportedRaw, current),
+    })
+    await send(slideNo.value, {
+      frontmatter: { dragPos: Object.keys(current).length ? current : null },
+      skipHmr: true,
+    } as SlidePatch)
+  }
+
   async function setNote(next: string) {
     await send(slideNo.value, { note: next })
   }
 
-  return { info, content, frontmatter, note, setContent, setFrontmatter, editFrontmatterRaw, setNote }
+  return { info, content, frontmatter, note, setContent, setFrontmatter, editFrontmatterRaw, setDragPos, setNote }
 }
 
 /**

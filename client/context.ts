@@ -26,6 +26,8 @@ export interface StudioContext {
   setFrontmatter: (values: Record<string, any>, label: string) => Promise<void>
   /** Rewrites the frontmatter block's text, for nested keys such as `dragPos`. */
   editFrontmatterRaw: (change: (raw: string) => string, label: string) => Promise<void>
+  /** Writes a placeholder's `dragPos.<name>` in place, without rebuilding the slide. */
+  setDragPos: (name: string, value: string | null, label: string) => Promise<void>
   setNote: (note: string) => Promise<void>
   /** Range of the current selection, or `null` when nothing is selected. */
   range: () => SourceRange | null

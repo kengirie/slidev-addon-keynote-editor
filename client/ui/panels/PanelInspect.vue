@@ -9,7 +9,7 @@ import { getBlock, replaceBlock } from '../../md/lines'
 import { canStyle, readClasses, writeClasses } from '../../md/classes'
 import { canReorder, deleteBlock, duplicateBlock, freePosition, moveBlockBy, returnToFlow } from '../../actions'
 import { missed, selection } from '../../state'
-import { parseBoxPos, resetBox, setBoxHidden, setBoxPos } from '../../md/boxes'
+import { formatBoxPos, parseBoxPos, resetBox, setBoxHidden } from '../../md/boxes'
 import { layoutBoxes } from '../../dom'
 import PropField from '../parts/PropField.vue'
 import StudioField from '../parts/StudioField.vue'
@@ -132,8 +132,13 @@ const boxGeometry = computed(() => {
   const current = selection.value
   if (current?.kind !== 'box' || !current.box)
     return null
-  return parseBoxPos(studio.frontmatter().dragPos?.[current.box])
-    ?? parseBoxPos(current.el.dataset.studioBoxDefault)
+  void studio.frontmatter()
+  void revision.value
+  // From the box as drawn: a position written in place is on screen before the
+  // frontmatter the panel holds catches up.
+  const box = studio.canvas.boxOf(current.el)
+  const saved = parseBoxPos(studio.frontmatter().dragPos?.[current.box])
+  return { x: box.x, y: box.y, w: box.w, h: box.h, rotate: saved?.rotate ?? 0 }
 })
 const boxMoved = computed(() => {
   const name = selection.value?.box
@@ -145,7 +150,14 @@ async function setBoxField(field: 'x' | 'y' | 'w' | 'h' | 'rotate', value: numbe
   if (!name || !boxGeometry.value || !Number.isFinite(value))
     return
   const next = { ...boxGeometry.value, [field]: value }
-  await studio.editFrontmatterRaw(raw => setBoxPos(raw, name, next), 'Set placeholder position')
+  // Painted at once and written in place, like a drag, so the slide is not rebuilt.
+  const el = selection.value!.el
+  el.style.left = `${next.x - studio.canvas.originOf(el).x}px`
+  el.style.top = `${next.y - studio.canvas.originOf(el).y}px`
+  el.style.width = `${next.w}px`
+  el.style.height = `${next.h}px`
+  el.style.transform = next.rotate ? `rotate(${next.rotate}deg)` : ''
+  await studio.setDragPos(name, formatBoxPos(next), 'Set placeholder position')
 }
 
 /** Keynote's フォーマット ＞ 選択内容にレイアウトを再適用. */

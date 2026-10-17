@@ -4,11 +4,11 @@ import { useNav } from '@slidev/client'
 import { useWindowSize } from '@vueuse/core'
 import { computed, onScopeDispose, provide, watch, watchEffect } from 'vue'
 import { duplicateBlock, nudgeBlock } from '../actions'
-import { setBoxHidden, setBoxPos } from '../md/boxes'
+import { formatBoxPos, setBoxHidden } from '../md/boxes'
 import { onDomEvent } from '../composables/useDomEvent'
 import { useSelection } from '../composables/useSelection'
 import { useSlideCanvas } from '../composables/useSlideCanvas'
-import { useSlideSource } from '../composables/useSlideSource'
+import { canRedo, canUndo, useSlideSource, useStudioHistory } from '../composables/useSlideSource'
 import { useTransformGizmo } from '../composables/useTransformGizmo'
 import { studioContext, studioKey } from '../context'
 import { dockWidth, editing, lastError, selection, studioOpen } from '../state'
@@ -69,7 +69,8 @@ const gizmo = useTransformGizmo({
     else
       selectionApi.selectThrough(x, y)
   },
-  writeBox: (name, geometry) => source.editFrontmatterRaw(raw => setBoxPos(raw, name, geometry), 'Move placeholder'),
+  // Written in place, as Slidev's v-drag does, so the slide is not rebuilt.
+  writeBox: (name, geometry) => source.setDragPos(name, formatBoxPos(geometry), 'Move placeholder'),
 })
 
 // Keynote: the press that selects a placeholder can already be a drag.
@@ -86,6 +87,7 @@ const context: StudioContext = {
   commit,
   setFrontmatter: (values, label) => source.setFrontmatter(values, label),
   editFrontmatterRaw: (change, label) => source.editFrontmatterRaw(change, label),
+  setDragPos: (name, value, label) => source.setDragPos(name, value, label),
   setNote: note => source.setNote(note),
   range: () => selection.value?.range ?? null,
   selectInserted: tag => selectionApi.selectInserted(tag),
@@ -164,6 +166,28 @@ onDomEvent<KeyboardEvent>(document, 'keydown', (event) => {
   // Without this Slidev, which listens further up, changed slide on the same key.
   event.stopPropagation()
   nudgeBlock(context, target, delta[0], delta[1])
+}, { capture: true })
+
+/*
+ * Undo and redo, ⌘Z and ⇧⌘Z (Ctrl on other systems).
+ *
+ * Read from the event itself rather than through Slidev's shortcut table: that
+ * table is built on VueUse's magic keys, which lose track of Z on macOS (no
+ * keyup arrives for a key pressed with ⌘), so redo worked only now and then.
+ * Inside a text field the browser's own undo applies, as in Keynote.
+ */
+const history = useStudioHistory()
+onDomEvent<KeyboardEvent>(document, 'keydown', (event) => {
+  if (!studioOpen.value || event.key.toLowerCase() !== 'z' || !(event.metaKey || event.ctrlKey) || event.altKey)
+    return
+  if (event.target instanceof Element && event.target.closest('input, textarea, [contenteditable="true"]'))
+    return
+  event.preventDefault()
+  event.stopPropagation()
+  if (event.shiftKey)
+    canRedo.value && history.redo()
+  else
+    canUndo.value && history.undo()
 }, { capture: true })
 
 // Selection belongs to one slide; navigating away drops it.

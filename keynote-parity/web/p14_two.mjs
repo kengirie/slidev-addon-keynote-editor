@@ -1,0 +1,16 @@
+import { open, read, sleep } from './lib.mjs'
+const fm = () => read().split(/^---$/m)[3].trim().replace(/\n/g, ' / ')
+const t = await open(2)
+const p = t.page
+const mark = () => p.evaluate(() => { window.__els = [...document.querySelectorAll('#slide-content [data-slidev-no="2"] [data-box]')] })
+const rebuilt = () => p.evaluate(() => window.__els.some(el => !document.contains(el)))
+await mark()
+await t.drag(300, 140, 350, 160); await t.drag(300, 380, 400, 430); console.log('1 move title+body:', fm(), '| rebuilt:', await rebuilt())
+await p.keyboard.press('Meta+z'); await sleep(2500); console.log('2 undo:', fm(), await t.box('body'), await t.box('title'))
+await p.keyboard.press('Meta+Shift+z'); await sleep(2500); console.log('3 redo:', fm())
+await p.keyboard.press('Escape'); await sleep(300); await t.click(900, 700); await p.getByRole('button', { name: '選択内容にレイアウトを再適用' }).click(); await sleep(2500)
+console.log('4 reapply body only:', fm(), await t.box('body'), await t.box('title'))
+await p.keyboard.press('Escape'); await sleep(300); await t.click(900, 700); await p.locator('.studio-dock input[type=number]').first().fill('500'); await p.locator('.studio-dock input[type=number]').first().dispatchEvent('change'); await sleep(1500)
+console.log('5 inspector X=500:', fm(), await t.box('body'))
+console.log('errors', t.errors.filter(e => !/Wake Lock/.test(e)))
+await t.browser.close()

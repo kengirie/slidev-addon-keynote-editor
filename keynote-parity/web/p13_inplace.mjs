@@ -1,0 +1,18 @@
+import { open, read, diff, sleep } from './lib.mjs'
+const fm = () => read().split(/^---$/m)[3].trim().replace(/\n/g, ' / ')
+const t = await open(2)
+const p = t.page
+const mark = () => p.evaluate(() => { window.__bodyEl = document.querySelector('#slide-content [data-slidev-no="2"] [data-box="body"]') })
+const replaced = () => p.evaluate(() => window.__bodyEl !== document.querySelector('#slide-content [data-slidev-no="2"] [data-box="body"]'))
+await mark()
+await t.drag(300, 380, 400, 430); console.log('1 move:', fm(), '| rebuilt:', await replaced(), '| sel:', (await t.state()).sel?.kind, await t.box('body'))
+await p.keyboard.press('ArrowRight'); await p.keyboard.press('Shift+ArrowDown'); await sleep(1500)
+console.log('2 nudge:', fm(), '| rebuilt:', await replaced(), await t.box('body'))
+await t.drag(400, 450, 300, 400); console.log('3 move again:', fm(), '| rebuilt:', await replaced(), await t.box('body'))
+await p.keyboard.press('Meta+z'); await sleep(2500); console.log('4 undo:', fm(), await t.box('body'))
+await p.keyboard.press('Meta+Shift+z'); await sleep(2500); console.log('5 redo:', fm(), await t.box('body'))
+await p.reload({ waitUntil: 'networkidle' }); await sleep(1500); console.log('6 after page reload:', await t.box('body'))
+await t.click(900, 700)
+await p.getByRole('button', { name: '選択内容にレイアウトを再適用' }).click(); await sleep(2500); console.log('7 reapply:', fm() || '(layout only)', await t.box('body'))
+console.log('errors', t.errors.filter(e => !/Wake Lock/.test(e)))
+await t.browser.close()

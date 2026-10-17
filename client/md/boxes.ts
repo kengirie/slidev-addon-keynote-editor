@@ -73,6 +73,22 @@ export function setBoxPos(raw: string, name: string, geometry: BoxGeometry | nul
   })
 }
 
+/**
+ * Sets the whole `dragPos` map, for a frontmatter text that may be out of date.
+ *
+ * A position written in place (HMR skipped) updates the server's frontmatter
+ * but not always the text it reports back, so the text is brought up to date
+ * from the map before it is used for undo.
+ */
+export function setDragPosMap(raw: string, map: Record<string, string>): string {
+  return edit(raw, (doc) => {
+    if (doc.has('dragPos'))
+      doc.delete('dragPos')
+    if (Object.keys(map).length)
+      doc.set('dragPos', doc.createNode(map))
+  })
+}
+
 /** Shows or hides a box on this slide, as Keynote's title/body checkboxes do. */
 export function setBoxHidden(raw: string, name: string, hidden: boolean): string {
   return edit(raw, (doc) => {
